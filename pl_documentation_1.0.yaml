@@ -1,0 +1,3204 @@
+openapi: 3.0.0
+servers:
+  - url: https://sandbox.przelewy24.pl
+    description: Sandbox server (uses test data)
+  - url: https://secure.przelewy24.pl
+    description: Production server (uses live data)
+info:
+  x-logo:
+    url: "get.php?file=przelewy24-logo_mini.png"
+    altText: LogoP24
+  contact:
+    name: Support Przelewy24
+    email: partner@przelewy24.pl
+  title: Przelewy24 REST API Dokumentacja
+  description: >
+
+
+
+    # System płatności
+
+
+    Serwis Przelewy24 prowadzi system autoryzacji i rozliczeń oraz świadczy usługi płatnicze w charakterze krajowej instytucji płatniczej. <br/><br/>
+
+
+
+    Poprzez API Przelewy24 możesz uzyskać dostęp do wszystkich usług oferowanych przez system. Poniższa dokumentacja zawiera najczęściej wykorzystywane funkcjonalności. Skontaktuj się z [Działem Handlowym](https://www.przelewy24.pl/pomoc/formularz-kontaktowy), aby poznać inne funkcjonalności. <br/><br/>
+
+    Aby uzyskać dostęp do API Przelewy24, w pierwszej kolejności [załóż konto](https://panel.przelewy24.pl/rejestracja.php) w Panelu Administracyjnym P24.
+
+    Po dokonanej rejestracji, sprzedawca ma możliwość śledzenia w panelu administracyjnym stanu swojego konta, wszystkich płatności klientów oraz wykonanych zwrotów na bieżąco. <br/>
+
+
+
+
+    ## Przebieg transakcji
+
+    Klient po skompletowaniu zamówienia klika na przycisk **"zapłać"**. System Sprzedawcy przesyła żądanie <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>rejestracji transakcji</b></a> do systemu P24 i otrzymuje zwrotnie unikalny TOKEN. Następnie klient jest przekierowany na panel transakcyjny P24. <br/><br/>
+
+    W przypadku anulowania płatności klient jest przekierowany na adres **“urlReturn"**.
+    <br/><br/>
+    Po poprawnej transakcji Klient jest kierowany na adres podany w parametrze **“urlReturn”**. System P24 wysyła <a href="#tag/Notification"><b>potwierdzenie transakcji</b></a> na adres podany w parametrze **"urlStatus"**. Notyfikacja z potwierdzeniem transakcji jest wysyłana w sposób **asynchroniczny**.
+    <br/><br/>
+    Dla potwierdzenia wiarygodności otrzymanego potwierdzenia w odpowiedzi na potwierdzenie wpłaty system sprzedawcy weryfikuje wynik <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1verify/put"><b>żądaniem zwrotnym</b></a>.
+     <br/><br/>
+
+    <img src="get.php?file=pl_payment_process.png" alt="Payment process" class="center">
+
+
+    ## Wymagania programowe
+
+    Aby prawidłowo przeprowadzić transakcję sprzedawca na swoich stronach WWW musi wprowadzić niżej opisaną obsługę wysyłania żądania transakcji oraz odbiór odpowiedzi o wyniku transakcji. <br/><br/>
+    Cały proces przebiega w sposób automatyczny bez konieczności ingerencji obsługi sklepu w proces płatności. <br/><br/>
+    Po poprawnie zakończonym procesie płatności status danego zamówienia w sklepie powinien automatycznie zmienić się na zapłacone/przyjęte do realizacji. W tym momencie obsługa sklepu może przystąpić do realizowania zamówienia.<br/><br/>
+
+    <br><br>
+
+    <img src="get.php?file=pl_transaction_process.png" alt="Environment" class="center">
+
+
+    # Definicje
+
+    **CVV** – kod zabezpieczający karty.
+
+
+    **Cyclic Redundancy Check (CRC)** – unikatowy klucz (String) otrzymany od Przelewy24 służący do generowania przesyłanej sumy kontrolnej.
+
+
+    **Dynamic Currency Conversion (DCC)** –  proces, w którym kwota transakcji jest przeliczana na walutę karty płatnika.
+
+
+    **Merchant** – firma lub osoba prywatna korzystająca z serwisu Przelewy24.
+
+
+    **Session ID** – unikalny identyfikator służący do zidentyfikowania pojedynczej transakcji w systemie partnera.
+
+    # Przypadki użycia
+
+    ## Jak wyświetlić w sklepie pełen wybór metod płatności?
+
+    Aby uprościć proces płatności, możliwe jest przeniesienie wyboru formy płatności przez klienta już na etapie składania zamówienia w sklepie.
+    Jeżeli dodatkowo w sklepie klient zaakceptuje warunki regulaminu Przelewy24 (w żądaniu należy ustawić <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>regulationAccept = true</b></a>), zostanie on po kliknięciu przycisku „zapłać”, przeniesiony bezpośrednio ze strony sklepu do banku / formularza kart płatniczych. Na stronie sklepu należy umieścić i wyświetlić klientowi następującą treść:<b> „Oświadczam, że zapoznałem się z [regulaminem](https://www.przelewy24.pl/regulamin) i [obowiązkiem informacyjnym](https://www.przelewy24.pl/obowiazek-informacyjny-platnik) serwisu Przelewy24”</b>. Pod słowem regulamin i obowiązek informacyjny musi być link do stron z tymi dokumentami. Checkbox nie może być odgórnie zaznaczony.<br><br>
+
+
+    Aby pobrać liste płatności, skorzystaj z metody <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1payment~1methods~1{lang}/get"><b>PaymentMethods</b></a>, opisanej w Dodatkowych Usługach.
+
+    <img src="get.php?file=white_label1_14.png" alt="Payment Methods" class="center"><br>
+
+    Pobraną listę można w dowolny sposób zaprezentować na swojej stronie.
+
+    ## Jak przekierować klienta do konkretnej metody płatności?
+
+    W celu przekierowania klienta bezpośrednio do wybranej metody płatności, należy przekazać identyfikator danej metody w polu <b>method</b> w żądaniu rejestracji transakcji. Dla przykładu, przy przekierowaniu do metody mTransfer, żądanie wygląda w ten sposób:
+
+    ```json
+        {
+          "merchantId": {{merchantId}},
+          "posId": {{posId}},
+          "sessionId": "{{sessionId}}",
+          "amount": {{amount}},
+          "currency": "{{currency}}",
+          "description": "{{description}}",
+          "email": "{{email}}",
+          "country": "PL",
+          "language": "pl",
+          "method": {{method}},
+          "urlReturn": "{{urlReturn}}",
+          "sign": "{{sign}}",
+        }
+    ```
+
+    ## Jak ograniczyć klientowi czas dostępny na zrealizowanie płatności?
+
+    W zależności od specyfiki danego systemu, może zachodzić potrzeba ograniczenia czasu, jaki klient ma na zrealizowanie płatności.  Do sterowania tym elementem służy parametr <b>timeLimit</b>. Ustawienie tego parametru na wartości z zakresu 1 - 99 określi limit czasu w minutach. Ustawienie parametru na 0 oznacza brak limitu.
+
+    ## Jak umożliwić płynny powrót klienta do sklepu, bez konieczności oczekiwania na synchroniczne potwierdzenie płatności?
+
+    W przypadku niektórych metod płatności, w szczególności e-przelewów, wykonana płatność zostaje potwierdzona w ciągu kilku minut. Istnieje możliwość "pozostawienia" klienta w serwisie transakcyjnym w celu oczekiwania na wynik transakcji i przekierowania go z powrotem do sklepu dopiero po otrzymaniu potwierdzenia (w ten sposób sklep będzie już posiadał potwierdzenie płatności) lub można od razu przekierować klienta do sklepu, bez oczekiwania na wynik transakcji. Wybór jednego z dwóch wariantów jest sterowany parametrem <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>waitForResult</b></a>. Wariant pierwszy wymaga ustawienia tego parametru na "true", wariant drugi na "false".
+
+    ## Jak zrealizować zwrot transakcji do klienta?
+
+    Realizacja zwrotów, jak wszystkie inne usługi w Przelewy24 jest w pełni automatyczna i realizowana jest poprzez narzędzie w panelu administracyjnym Przelewy24 lub przez metodę <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1transaction~1refund/post"><b>transction/refund</b></a>. <br/><br/>
+
+    Do jednej transakcji można zlecić wiele żądań zwrotu, jednak sumaryczna wartość zwrotów nie może przekroczyć pierwotnej wartości transakcji.
+
+
+    ## Czy po wygaśnięciu sesji klient może dokończyć proces płatności?
+
+    W sytuacji, gdy klient porzuci proces płatności, np. po przejściu na stronę banku, aby ułatwić mu dokończenie transakcji system Przelewy24 oferuje możliwość automatycznego wysłania do klienta maila z linkiem do dokończenia rozpoczętego procesu. Jeżeli klient skorzysta z tej opcji z punktu widzenia sklepu nie będzie różniło się to niczym od transakcji zrealizowanej w trybie on-line. <br><br>
+
+    Aby włączyć taką funkcjonalność należy skontaktować się z opiekunem handlowym: partner@przelewy24.pl, tel. +48 61 642 93 45
+
+
+    # Materiały graficzne
+
+
+    P24 logo i bannery dostępne sa pod adresem:
+
+    [https://www.przelewy24.pl/do-pobrania#materialy-graficzne](https://www.przelewy24.pl/do-pobrania#materialy-graficzne)
+
+
+
+    # Środowiska programistyczne
+
+    ## Środowisko produkcyjne
+
+    Każde żądanie rozróżnione jest swoim własnym, unikalnym adresem URL. W ten sposób system P24 wie, z której funkcji API chcesz skorzystać. W połączeniu z bazowym adresem URL, dla za równo produkcyjnego jak i testowego środowiska, otrzymasz kompletny adres API-URL.
+
+
+    Bazowy URL systemu produkcyjnego:<br/>
+    https://secure.przelewy24.pl/api/v1
+
+
+    Transakcje produkcyjne będą widoczne w panelu<br/>
+    https://panel.przelewy24.pl/index.php
+
+    ## Środowisko testowe
+
+    Podczas implementowania mechanizmów w Twoim systemie możesz skorzystać ze środowiska testowego. Środowisko to umożliwia zweryfikowanie poprawności instalacji bez konieczności dokonywania przelewów. <br><br>
+    Adresy URL do połączeń do środowiska testowego: <br>
+    https://sandbox.przelewy24.pl/api/v1<br><br>
+
+    Transakcje testowe będą widoczne w panelu testowym:<br>
+    https://sandbox.przelewy24.pl/panel/index.php<br><br>
+
+    **<u>Środowisko testowe nie może być wykorzystywane do realizacji transakcji produkcyjnych.</u>**
+
+    # Adresy IP serwerów
+
+    Zalecamy zabezpieczenie skryptów przed podejrzanymi wywołaniami, stosując filtrację adresów IP dla przychodzących połączeń. Zakresy IP serwerów Przelewy24 to: <br><br>
+    <font class = "right"><b>91.216.191.181 – 91.216.191.185, </b></font><br>
+    <font class = "right"><b>5.252.202.255</b></font><br>
+
+    # Wymagania środowiskowe
+
+    Transport Layer Security - TLS 1.2 (wymagane minimum)<br/><br/>
+
+    https://wiki.mozilla.org/Security/Server_Side_TLS<br/>
+    https://en.wikipedia.org/wiki/Transport_Layer_Security
+    <br><br>
+
+    OpenSSL 1.0.1<br/><br/>  https://www.openssl.org/news/changelog.html#x31<br><br>
+
+    cURL 7.34.0<br/><br/> https://curl.haxx.se/docs/manpage.html#--tlsv12
+
+    # Authentication
+
+    P24 wspiera mechanizmy Basic Authentication.
+
+  version: 1.0.16
+x-tagGroups:
+  - name: Obsługa transakcji
+    tags:
+      - Transaction service API
+      - Notification
+  - name: Dodatkowe usługi
+    tags:
+      - Additional API functionality
+      - RefundNotification
+  - name: Płatność kartą
+    tags:
+      - Card Description
+      - Card API
+      - Card Notification
+  - name: BLIK
+    tags:
+      - BLIK Use Cases
+      - BLIK API
+      - BLIK Additional
+      - Alias Update Notification
+  - name: Google Pay
+    tags:
+      - GPay Description
+      - GPay API
+  - name: Apple Pay
+    tags:
+      - APay Description
+      - APay API
+
+paths:
+   /api/v1/transaction/register:
+    post:
+      tags:
+        - Transaction service API
+      summary: Rejestracja transakcji
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionRequestBody1"
+        description: Przed wysłaniem żądania transakcji należy zapisać jej dane do lokalnej bazy danych sprzedawcy. W szczególności należy zachować informacje o identyfikatorze     sesji i kwocie transakcji. <br><br><hr>
+          <h3>Przekierowanie do panelu transakcyjnego</h3>
+          Adres URL https://secure.przelewy24.pl/trnRequest/{TOKEN}<br><br>
+          gdzie {TOKEN} został pobrany w wyniku zarejestrowania transakcji.<br>
+          <hr><br>
+
+          Po poprawnej transakcji zostaje wywoływany adres URL przekazany w procesie rejestracji transakcji w parametrze <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>"urlStatus"</b></a>. Powiadomienie następuje niezależnie od tego, czy Klient został przekierowany na <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>"urlReturn"</b></a>, czy też nie. Powiadomienie zostaje wysłane tylko i wyłącznie dla poprawnej wpłaty. System nie wysyła informacji o transakcjach, które nie zostały wykonane, bądź zostały wykonane niepoprawnie. Notyfikacja wysyłana jest w formacie JSON. <br/><br/>
+
+          <a href="#tag/Notification"><font color = "red"><b>Zobacz JSON wyniku transakcji</b></font></a>
+
+        required: true
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionRegistrationResponse"
+        "400":
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+   /api/v1/transaction/verify:
+    put:
+      tags:
+        - Transaction service API
+      summary: Weryfikacja transakcji
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionVerificationBody"
+        description: Po odebraniu powiadomienia, system Partnera powinien wykonać dodatkową operację mającą na celu potwierdzenie przyjęcia wpłaty oraz potwierdzenie autentyczności    powiadomienia. Konieczne jest wykonanie weryfikacji transakcji za pomocą metody transaction/verify.<br><br>
+          **Ważne!**  Transakcja zostaje uznana za potwierdzoną po jej weryfikacji. Jeżeli klient dokona transakcji, wróci na stronę sprzedawcy, ale sprzedawca nie zweryfikuje transakcji, dana kwota nie zostanie przekazana sprzedawcy ani uwzględniona w rozliczeniach. Pozostanie ona do dyspozycji klienta w formie przedpłaty.
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionVerificationResponse"
+        "400":
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+
+
+   /api/v1/testAccess:
+    get:
+      tags:
+        - Additional API functionality
+      summary: Test Access
+      description: Test połączenia. REST korzysta ze standardu autoryzacji  <a href="#section/Authentication"><b>"basicAuth"</b></a>, gdzie login i hasło to, odpowiednio, ID konta w P24 i klucz API (klucz do raportów) uzyskany z sekcji “Moje dane”.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionTestAccess200"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+   /api/v1/payment/methods/{lang}:
+    get:
+      tags:
+        - Additional API functionality
+      summary: Metody płatności
+      description: Metoda zwraca listę dostępnych metod płatności.
+      parameters:
+        - name: lang
+          in: path
+          description: "Kod wybranego języka. Dostępne: pl , en"
+          required: true
+          schema:
+            type: string
+            enum:
+              - pl
+              - en
+      responses:
+        "200":
+          description: Lista metod płatności
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PaymentMethodsResponse"
+                  error:
+                    type: string
+                    default: ""
+                type: object
+        "403":
+          description: Not authorized.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "404":
+          description: Payment methods not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BasicResponse"
+      security:
+        - basicAuth: []
+   /api/v1/transaction/refund:
+    post:
+      tags:
+        - Additional API functionality
+      summary: Zwrot transakcji
+      description: Zwróć jedną lub wiele transakcji.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionRefundJsonRequestBody'
+        description: 'Parametr ''refunds'' może zawierać wiele zwrotów.'
+        required: true
+      responses:
+        "201":
+          description: 'Created. Parametr ''data'' zawiera wszystkie zwroty.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionRefund201'
+        "400":
+          description: 'Invalid input data'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidInputDataRefund'
+        "401":
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedResponse'
+        "409":
+          description: 'Conflict'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionRefund409'
+        "500":
+          description: 'Unknown error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Refund500Response'
+      security:
+        - basicAuth: []
+   /api/v1/transaction/registerOffline:
+    post:
+      description: Ta metoda umożliwia rejestrowanie płatności offline. Aby skorzystać z tej metody, w pierwszej kolejności trzeba zarejestrować standardową transakcję płatniczą z użyciem metody <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>.<br><br> Dodatkowo można kontrolować, w którym banku zostanie wykonana płatność, za pomocą parametru <b>method</b>.
+      tags:
+        - Additional API functionality
+      summary: Rejestracja transakcji offline
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransactionRegisterOfflineRequest"
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: "#/components/schemas/TransactionRegisterOfflineRequest"
+        description: Input parameters.
+        required: true
+      responses:
+        "200":
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionRegistrationOffline200"
+        "400":
+          description: Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionRegistrationOffline409"
+        "500":
+          description: Undefined error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCodeResponse"
+      security:
+        - basicAuth: []
+   /api/v1/transaction/register/splitpayment:
+    post:
+      description: Obciążanie płatności w trybie Split Payment odbywa się z wykorzystaniem uprzednio zarejestrowanego tokenu w procesie analogicznym do <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>. Podczas rejestracji tokenu, należy dodać obiekt <b>splitPaymentDetails</b>, charakterystyczny dla tej formy wykonania transakcji.
+      tags:
+        - Additional API functionality
+      summary: Split Payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TranstactionSplitPayment"
+        description: Array
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TransactionRegistrationResponse"
+        "400":
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+   '/api/v1/refund/by/orderId/{orderId}':
+    get:
+      tags:
+        - Additional API functionality
+      summary: Dane zwrotu dla OrderID
+      description: Uzyskaj szczegóły zwrotu na podstawie ID zamówienia.
+      consumes:
+        - application/json
+        - application/x-www-form-urlencoded
+      parameters:
+        -
+          name: orderId
+          in: path
+          description: 'Id zamówienia dla istniejącego zwrotu'
+          required: true
+          type: integer
+      responses:
+        "200":
+          description: 'Żądanie zostało pomyślnie przetworzone. Parametr ''data'' zawiera dane zwrotu.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionRefundsInfoResponse'
+        "401":
+          description: 'Not authorized'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedResponse'
+        "404":
+          description: 'Refund with given Order Id not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionNotFoundResponse'
+        "500":
+          description: 'Undefined error'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorCodeResponse'
+      security:
+        - basicAuth: []
+   '/api/v1/transaction/by/sessionId/{sessionId}':
+    get:
+      tags:
+        - Additional API functionality
+      summary: Dane o transakcji poprzez sessionID
+      description: Metoda zwraca informacje o transakcji na podstawie pola “sessionId”.
+      consumes:
+        - application/json
+        - application/x-www-form-urlencoded
+      parameters:
+        -
+          name: sessionId
+          in: path
+          description: 'Unikalny identyfikator transakcji z systemu sprzedawcy'
+          required: true
+          type: string
+      responses:
+        "200":
+          description: 'OK'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionBySessionIdSuccessResponse'
+        "400":
+          description: 'Invalid input data'
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: 'Incorrect authentication'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnauthorizedResponse'
+        "404":
+          description: 'Transaction not exist'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionNotFoundResponse'
+      security:
+        - basicAuth: []
+
+
+
+   /api/v1/paymentMethod/blik/chargeByCode:
+    post:
+      tags:
+        - BLIK API
+      summary: 'BLIK charge by code'
+      description: Umożliwia obciążenie transakcji za pomocą kodu T6. Zwraca unikalny identyfikator transakcji.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RecurringParams"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlikChargeByCodeResponse"
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlikChargeByCodeResponse"
+        "400":
+          description: Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "500":
+          description: Undefined error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCodeResponse"
+      security:
+        - basicAuth: []
+   /api/v1/paymentMethod/blik/chargeByAlias:
+    post:
+      tags:
+        - BLIK API
+      summary: BLIK charge by Alias
+      description: ChargeByAlias to metoda płatności typu one-click. Pozwala na obciążenie środków klienta, korzystając z uprzednio pozyskanego aliasu (**getAliasesByEmail**). Pozyskany alias musi zostac przekazany w parametrze <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>methodRefId</b></a> podczas rejestracji transakcji
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlikOneClick"
+      responses:
+        "200":
+          description: successful operation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlikChargeByAliasResponse"
+        "400":
+          description: bad request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "409":
+          description: alternativeKeys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeByAlias409"
+        "500":
+          description: Undefined error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCodeResponse"
+      security:
+        - basicAuth: []
+   /api/v1/paymentMethod/blik/getAliasesByEmail/{email}:
+    get:
+      tags:
+        - BLIK API
+      summary: Getting Aliases ByEmail
+      description: Aby uzyskać alias do kolejnych płatności, skorzystaj z metody
+                    <b>"getAliasesByEmail" </b><br><br>
+                    Metoda zwraca listę aliasów (wraz z typem i statusem) utworzonych dla danego adresu e-mail w zakresie danego merchanta.
+      parameters:
+        - name: email
+          in: path
+          description: Dla aliasów zarejestrowanych poprzez e-mail
+          required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction200Blik"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "404":
+          description: 'Alias not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionNotFoundResponse'
+      security:
+        - basicAuth: []
+   /api/v1/paymentMethod/blik/getAliasesByEmail/{email}/custom:
+    get:
+      tags:
+        - BLIK API
+      summary: Getting Aliases ByEmail (Custom)
+      description: Aby uzyskać alias do kolejnych płatności, skorzystaj z metody
+                    <b>"getAliasesByEmail" </b><br><br>
+                    Metoda zwraca listę aliasów (wraz z typem i statusem) utworzonych dla danego adresu e-mail w zakresie danego merchanta.
+      parameters:
+        - name: email
+          in: path
+          description: Dla aliasów zarejestrowanych z wartościami <b><i><b>"aliasValue"</b></b></i> i <b><i><b>"aliasLabel"</b></b></i>
+          required: true
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Transaction200Blik"
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "404":
+          description: 'Alias not found'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionNotFoundResponse'
+      security:
+        - basicAuth: []
+
+
+
+   "/api/v1/card/info/{orderId}":
+    get:
+      tags:
+        - Card API
+      summary: Card info
+      parameters:
+        - name: orderId
+          in: path
+          description: Unikalne ID zamówienia.
+          required: true
+          schema:
+            type: integer
+      description: Metoda zwraca informację na temat danej karty płatniczej na podstawie poprzedniej płatności. Włączając numer referencyjny do obciążenia kart bez autoryzacji CVV.
+      responses:
+        "200":
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/cardinfores"
+        "400":
+          description: Wrong input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCodeResponse"
+        "403":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "404":
+          description: Transaction not exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorCodeResponse"
+      security:
+        - basicAuth: []
+   /api/v1/card/chargeWith3ds:
+    post:
+      tags:
+        - Card API
+      summary: Charge card with 3DS
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardChargeRequestBody"
+      description: Metoda umożliwia obciążenie karty na podstawie numeru referencyjnego.
+      responses:
+        "200":
+          description: The charge card command has been accepted - notification will be
+            send on success.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCard3dsSuccessResponse"
+        "201":
+          description: The card payment requires 3DS redirection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCard3dsSuccessResponse"
+        "400":
+          description: Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+   /api/v1/card/charge:
+    post:
+      tags:
+        - Card API
+      summary: Charge card
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardChargeRequestBody"
+      description: Metoda umożliwia obciążenie karty na podstawie numeru referencyjnego.
+      responses:
+        "200":
+          description: The charge card command has been accepted - notification will be
+            send on success.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChargeCardSuccessResponse"
+        "400":
+          description: Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+      security:
+        - basicAuth: []
+   /api/v1/card/pay:
+    post:
+      tags:
+        - Card API
+      summary: Card Payment
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardRegisterRequestBody"
+      description: Metoda służy do obciążenia karty klienta. Metoda przesyła dane kartowe bezpośrednio.
+      responses:
+        "200":
+          description: The card payment has been succesed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardPaySuccessResponse"
+        "201":
+          description: The card payment requires 3DS redirection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardPayThreeDSecureResponse"
+        "400":
+          description: Invalid input data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvalidInputData"
+        "401":
+          description: Not authorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UnauthorizedResponse"
+        "409":
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardPayResponse409"
+      security:
+        - basicAuth: []
+
+
+
+   /bundle/payWithGoogle/{TOKEN}:
+    get:
+      tags:
+        - GPay API
+      summary: Przekazanie tokenu
+      servers:
+      - url: https://secure.przelewy24.pl
+        description: Production server (uses live data)
+      consumes:
+        - application/json
+        - application/x-www-form-urlencoded
+      parameters:
+        -
+          name: TOKEN
+          in: path
+          description: Token uzyskany z Przelewy24.
+      description:
+        Po otrzymaniu tokenu z Przelewy24 należy na stronie wywołać skrypt w Javascript.<br><br>
+
+        Po wykonaniu transakcji wywoływana jest odpowiednia odpowiedź zwrotna (callback).
+
+        W przypadku transakcji wymagającej dodatkowej autoryzacji (3DSecure) klient zostaje przekierowany, a następnie wraca na adres podany przy rejestracji transakcji w parametrze  <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>"urlReturn"</b></a>.
+      x-codeSamples:
+          - lang: HTML
+            source: |
+              <head>
+                <meta charset="UTF-8">
+                <meta name="viewport"
+                      content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+                <meta http-equiv="X-UA-Compatible" content="ie=edge">
+                <title>PayWithGoogle</title>
+                <script src="https://secure.przelewy24.pl/bundle/payWithGoogle/{{TOKEN}}"></script>
+              </head>
+              <body>
+              <script>
+                document.addEventListener("DOMContentLoaded", function () {
+                    Przelewy24PayWithGoogle.config({
+                        errorCallback: function () {
+                            alert("error");
+                        },
+                        exceptionCallback: function () {
+                            alert("exception");
+                        },
+                        requestFailedCallback: function () {
+                            alert('requestFailed');
+                        },
+                        completePaymentCallback: function () {
+                            alert("success");
+                        }
+                    });
+                    Przelewy24PayWithGoogle.charge();
+                });
+              </script>
+              </body>
+      security:
+        - basicAuth: []
+   /bundle/ApplePay/{TOKEN}:
+    get:
+      tags:
+        - APay API
+      summary: Przekazanie tokenu
+      servers:
+      - url: https://secure.przelewy24.pl
+        description: Production server (uses live data)
+      consumes:
+        - application/json
+        - application/x-www-form-urlencoded
+      parameters:
+        -
+          name: TOKEN
+          in: path
+          description: Token uzyskany z Przelewy24.
+      description:
+        Po otrzymaniu tokenu z Przelewy24 należy na stronie wywołać skrypt w JS.<br><br>
+
+        Skrypt w Java Script procesuje transakcje, po jej wykonaniu wywoływana jest odpowiednia odpowiedź zwrotna (callback).
+      x-codeSamples:
+          - lang: HTML
+            source: |
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport"
+                          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+                    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+                    <title>Apple Pay</title>
+                    <script src="https://secure.przelewy24.pl/bundle/applepay/{{TOKEN}}"></script>
+                </head>
+                <body>
+                <script>
+                    document.addEventListener("DOMContentLoaded", function () {
+                      Przelewy24ApplePay.config({
+                        errorCallback: function () {
+                            alert("error");
+                        },
+                        exceptionCallback: function () {
+                            alert("exception");
+                        },
+                        requestFailedCallback: function () {
+                            alert('requestFailed');
+                        },
+                        completePaymentCallback: function () {
+                            alert("success");
+                        }
+                      });
+                    Przelewy24ApplePay.charge();
+                    });
+                  </script>
+
+                  </body>
+      security:
+        - basicAuth: []
+
+
+
+####components######
+components:
+  securitySchemes:
+   basicAuth:
+      description: Jest to podstawowa metoda uwierzytelnienia. User i secretId dostępne są w panelu:<br/>- "User" odpowiada tej samej wartości, co posId,</br>- secretId, odpowiada tej samej wartości co klucz do raportów (klucz do API).
+      type: http
+      scheme: basic
+  schemas:
+    TransactionVerificationResponse:
+      properties:
+        data:
+          properties:
+            status:
+              type: string
+              default: success
+          type: object
+        responseCode:
+          type: number
+          default: 0
+    TransactionVerificationBody:
+      properties:
+        merchantId:
+          description: ID Sklepu
+          type: integer
+        posId:
+          description: ID Sklepu (domyślnie ID Sprzedawcy)
+          type: integer
+        sessionId:
+          description: Unikalny identyfikator z systemu sprzedawcy
+          type: string
+          maxLength: 100
+        amount:
+          description: Kwota transakcji wyrażona w groszach, np. 1.23 PLN = 123
+          type: integer
+        currency:
+          description: Waluta
+          type: string
+          maxLength: 3
+          default: "PLN"
+        orderId:
+          description: Id zamówienia z systemu Przelewy24
+          type: integer
+        sign:
+          description: Suma kontrolna parametrów:<br>
+            {<font color = "brown">"sessionId":</font>"str",<font color = "brown">"orderId":</font>int,<font color = "brown">"amount":</font>int,<font color = "brown">"currency":</font>"str",<font color = "brown">"crc":</font>"str"}
+            <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br> przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty
+            <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+          type: string
+      required:
+        - posId
+        - sessionId
+        - amount
+        - currency
+        - orderId
+        - sign
+        - merchantId
+    AvailabilityHoursResponse:
+      properties:
+        mondayToFriday:
+          type: string
+        saturday:
+          type: string
+        sunday:
+          type: string
+    TransactionRequestBody1:
+      type: object
+      properties:
+        merchantId:
+          name: merchantId
+          in: formData
+          description: ID Sklepu
+          type: integer
+        posId:
+          name: posId
+          in: formData
+          description: ID Sklepu (domyślnie ID Sprzedawcy)
+          type: integer
+        sessionId:
+          name: sessionId
+          in: formData
+          description: Unikalny identyfikator z systemu sprzedawcy
+          type: string
+          maxLength: 100
+        amount:
+          name: amount
+          in: formData
+          description: Kwota transakcji wyrażona w groszach, np. 1.23 PLN = 123
+          type: integer
+        currency:
+          name: currency
+          in: formData
+          description: Wartość zgodna z ISO np. PLN
+          type: string
+          maxLength: 3
+        description:
+          name: description
+          in: formData
+          description: Opis transakcji
+          type: string
+          maxLength: 1024
+        email:
+          name: email
+          in: formData
+          description: Email Klienta
+          type: string
+          maxLength: 50
+        client:
+          name: client
+          in: formData
+          description: Imię i nazwisko Klienta
+          type: string
+          maxLength: 40
+        address:
+          name: address
+          in: formData
+          description: Adres Klienta
+          type: string
+          maxLength: 80
+        zip:
+          name: zip
+          in: formData
+          description: Kod pocztowy Klienta
+          type: string
+          maxLength: 10
+        city:
+          name: city
+          in: formData
+          description: Miasto Klienta
+          type: string
+          maxLength: 50
+        country:
+          name: country
+          in: formData
+          description: Kody krajów zgodnie ISO, np. PL, DE itp
+          type: string
+          maxLength: 2
+          default: PL
+        phone:
+          name: phone
+          in: formData
+          description: Telefon klienta w formacie 481321132123
+          type: string
+          maxLength: 12
+        language:
+          name: language
+          in: formData
+          description: "Jeden z następujących kodów krajów zgodnie z normą ISO 639-1: bg, cs, de, en, es, fr, hr, hu, it, nl, pl, pt, se, sk"
+          type: string
+          maxLength: 2
+          default: pl
+        method:
+          name: method
+          in: formData
+          description: Identyfikator metody płatności. Lista metod płatności widoczna w panelu lub dostępna przez API
+          type: integer
+        urlReturn:
+          name: urlReturn
+          in: formData
+          description: Adres powrotny po zakończeniu transakcji
+          type: string
+          maxLength: 250
+        urlStatus:
+          name: urlStatus
+          in: formData
+          description: Adres do przekazania statusu transakcji
+          type: string
+          maxLength: 250
+        timeLimit:
+          name: timeLimit
+          in: formData
+          description: Limit czasu na wykonanie transakcji, 0 - brak limitu, maks. 99 (w minutach)
+          type: integer
+        channel:
+          name: channel
+          description: "
+                      1 - karty,
+                      2 - przelewy,
+                      4 - przelew tradycyjny,
+                      8 -
+                                  N/A,
+                      16 - wszystkie 24/7 – udostępnia wszystkie metody płatności,
+                      32 -
+                                  użyj przedpłatę,
+                      64 – tylko metody pay-by-link,
+                      128 –
+                                  formy ratalne,
+                      256 – wallety
+
+                      Aby uruchomić
+                                  poszczególne kanały, nalezy zsumowac ich wartości.
+
+
+                      Przykład:
+
+                      karty i przelew tradycyjny:
+                                  channel=5"
+          type: integer
+          enum:
+            - 1
+            - 2
+            - 4
+            - 8
+            - 16
+            - 32
+            - 64
+            - 128
+            - 256
+        waitForResult:
+          type: boolean
+          description: Parametr determinuje, czy użytkownik zostanie przekierowany z powrotem do sklepu od razu po wykonaniu płatności, czy dopiero, gdy dotrze wynik transakcji (z potwierdzeniem płatności).  <a href="#section/Przypadki-uzycia/Jak-umozliwic-plynny-powrot-klienta-do-sklepu-bez-koniecznosci-oczekiwania-na-synchroniczne-potwierdzenie-platnosci"><b>Przeczytaj więcej</b></a>
+        regulationAccept:
+          type: boolean
+          description: 'Akceptacja regulaminu Przelewy24: <br/>false – wyświetl zgodę na stronie p24 (domyślna),<br/>true – akceptacja dokonana, nie wyświetlaj.<br/>W przypadku wysyłania parametru „true”, na stronie Partnera musi znaleźć się zgoda o treści: „Oświadczam, że zapoznałem się z [regulaminem](https://www.przelewy24.pl/regulamin) i [obowiązkiem informacyjnym](https://www.przelewy24.pl/obowiazekinformacyjny) serwisu Przelewy24”. <br/>Pod słowami <i>regulamin</i> i <i>obowiązek informacyjny</i> musi być link do stron z tymi dokumentami. Checkbox nie może być odgórnie zaznaczony.'
+          default: false
+        shipping:
+          name: shipping
+          in: formData
+          description: Koszt dostawy/wysyłki
+          type: integer
+        transferLabel:
+          name: transferLabel
+          in: formData
+          description: Opis przekazywany do tytułu przelewu
+          type: string
+          maxLength: 20
+        mobileLib:
+          name: mobileLib
+          description: Przesłanie tego parametru jest niezbędne przy wykorzystaniu bibliotek SDK. W <b>mobileLib</b> należy przesłać wartość 1, natomiast w parametrze <b>sdkVersion</b> należy wskazać wersję biblioteki, z której chcemy skorzystać.
+          type: integer
+          enum:
+            - 1
+        sdkVersion:
+          name: sdkVersion
+          in: formData
+          description: Wersja bibliotek mobilnych. Określa czy transakcja jest mobilna.
+          type: string
+          maxLength: 10
+        sign:
+          name: sign
+          in: formData
+          type: string
+          maxLength: 100
+          description: <br>Suma kontrolna parametrów:<br>
+            {<font color = "brown">"sessionId":</font>"str",<font color = "brown">"merchantId":</font>int,<font color = "brown">"amount":</font>int,<font color = "brown">"currency":</font>"str",<font color = "brown">"crc":</font>"str"}
+            <br><br> liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br>  przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+        encoding:
+          name: encoding
+          in: formData
+          description: "System kodowania przesyłanych znaków: ISO-8859-2, UTF-8, Windows-1250"
+          type: string
+          maxLength: 15
+        methodRefId:
+          name: methodRefId
+          in: formData
+          description: Specjalny parametr wymagany dla niektórych procesów płatności, np. BLIK i Karty one-click.
+          type: string
+          maxLength: 250
+        cart:
+          description: Koszyk
+          items:
+            $ref: "#/components/schemas/CartParameters"
+        additional:
+          type: object
+          description: Zbiór dodatkowych danych nt. transakcji i płatnika
+          properties:
+            shipping:
+              type: object
+              description: Dodatkowe dane dostawy
+              properties:
+                type:
+                  type: integer
+                  description: Typ dostawy:<br/> 0 - kurier<br/>1 - dostawa do punktu<br/>2 - paczkomat<br/>3 - paczka w sklepie
+                  enum:
+                    - 0
+                    - 1
+                    - 2
+                    - 3
+                address:
+                  type: string
+                  description: 'Adres dostawy: ulica i numer'
+                zip:
+                  type: string
+                  description: Kod pocztowy
+                city:
+                  type: string
+                  description: Miasto adresu dostawy
+                country:
+                  type: string
+                  description: Kraj adresu dostawy
+              required:
+               - type
+               - address
+               - zip
+               - city
+               - country
+      required:
+        - merchantId
+        - posId
+        - sessionId
+        - amount
+        - currency
+        - description
+        - email
+        - country
+        - language
+        - urlReturn
+        - ttl
+        - sign
+    TransactionRegistrationResponse:
+      properties:
+        data:
+          properties:
+            token:
+              type: string
+          type: object
+        responseCode:
+          type: number
+          default: 0
+
+    Transaction200Blik:
+      properties:
+        data:
+          description: Tablica obiektów związanych z aliasem BLIK
+          items:
+            $ref: "#/components/schemas/BlikAlias200"
+        responseCode:
+          type: integer
+          description: Kod odpowiedzi
+          default: 0
+
+    BlikAlias200:
+      properties:
+        value: 
+          type: string
+          description: Wartość aliasu
+        type:
+          type: string
+          description: Typ aliasu
+        status:
+          type: string
+          description: Status aliasu
+        expirationDate:
+          type: string
+          description: Data ważności aliasu
+
+    InvalidInputData:
+      properties:
+        error:
+          type: string
+          default: Invalid input data
+          example: Invalid input data
+        code:
+          type: number
+          default: 400
+          example: 400
+    UnauthorizedResponse:
+      properties:
+        error:
+          type: string
+          default: Incorrect authentication
+          example: Incorrect authentication
+        code:
+          type: number
+          default: 401
+          example: 401
+    TransactionTestAccess200:
+      properties:
+        data:
+          type: boolean
+          default: true
+        error:
+          type: string
+    PaymentMethodsResponse:
+      properties:
+        name:
+          type: string
+          description: Name of payment method
+        id:
+          type: integer
+          description: Payment method ID
+        status:
+          type: boolean
+          description: Specifies whether a given method is active
+        imgUrl:
+          type: string
+          description: Link do grafiki
+        mobileImgUrl:
+          type: string
+          description: Link do grafiki mobilnej
+        mobile:
+          type: boolean
+          description: Czy forma płatności jest dostępna mobilnie
+        availabilityHours:
+          $ref: "#/components/schemas/AvailabilityHoursResponse"
+    BasicResponse:
+      properties:
+        data:
+          type: array
+          default: Payment methods not found
+          items:
+            type: string
+            default: Payment methods not found
+        responseCode:
+          default: 404
+          type: number
+    TransactionRefundJsonRequestBody:
+      properties:
+        requestId:
+          type: string
+          description: Indywidualne ID żądania
+          maxLength: 45
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundRequestArrayDataBasic"
+        refundsUuid:
+          type: string
+          description: Indywidualne ID dla poprawnego żądania zwrotu w systemie Merchanta
+          maxLength: 35
+        urlStatus:
+          type: string
+          description: Adres do przekazania danych zwrotów
+      required:
+        - requestId
+        - refunds
+        - refundsUuid
+    RefundRequestArrayDataBasic:
+      properties:
+        orderId:
+          type: integer
+          description: ID zamówienia zwracanej transakcji z systemu Przelewy24
+        sessionId:
+          type: string
+          description: session ID zwracanej transakcji z systemu Partnera
+        amount:
+          type: integer
+          description: Kwota zwrotu
+        description:
+          type: string
+          description: Opis zwrotu widoczny na przelewie
+          maxLength: 35
+      type: object
+      required:
+        - orderId
+        - sessionId
+        - amount
+    TransactionRefund201:
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransactionRefund201Item"
+        responseCode:
+          type: number
+          example: 0
+    TransactionRefund201Item:
+      properties:
+        orderId:
+          type: integer
+          description: ID zamówienia transakcji z systemu Przelewy24
+        sessionId:
+          type: string
+          description: ID sesji transkacji z systemu Partnera
+        amount:
+          type: integer
+          description: Kwota zwrotu
+        description:
+          type: string
+          description: Opis transakcji
+        status:
+          type: boolean
+          example: true
+          description: Czy próba zwrotu była udana?
+        message:
+          type: string
+          example: success
+          description: Opis tekstowy udanego zwrotu
+    InvalidInputDataRefund:
+      properties:
+        error:
+          type: string
+          example: Request already exists
+          description: Komunikat błędu. Możliwe wartości:<br/><br/>"Invalid input parameters" - w przypadku podania błędnych parametrów lub ich wartości,<br/><br/> "Request already exists" - w przypadku gdy zwrot dla danej transakcji już istnieje,<br/><br/> "Concurent call" - w przypadku powielonego requestu zwrotu.
+        code:
+          type: number
+          default: 400
+          example: 400
+    TransactionRefund409:
+      properties:
+        error:
+          type: array
+          items:
+            $ref: "#/components/schemas/TransactionRefund409Item"
+        code:
+          type: integer
+          example: 409
+    TransactionRefund409Item:
+      properties:
+        orderId:
+          type: integer
+          description: ID zamówienia transakcji z systemu Przelewy24
+        sessionId:
+          type: string
+          description: ID sesji transkacji z systemu Partnera
+        amount:
+          type: integer
+          description: Kwota zwrotu
+        description:
+          type: string
+          description: Opis zwrotu
+        status:
+          type: boolean
+          example: false
+          description: Czy próba zwrotu była udana?
+        message:
+          type: string
+          example: The amount of refund exceeds available amount for the transaction
+          description: Komunikat błędu. Możliwe wartości:<br/><br/>"Transaction not found" - w przypadku, gdy transakcja nie została odnaleziona, <br/><br/>"Transaction in wrong status - cannot refund" - w przypadku, gdy transakcja jest w niewłaściwym statusie, przez co niemożliwe jest wykonanie zwrotu, <br/><br/>"Insufficient funds available" - w przypadku braku wystarczającyh środków na wykonanie zwrotu, <br/><br/>"The amount of refund exceeds available amount for the transaction" - w przypadku, gdy w żądaniu zwrotu podano kwotę, która przekracza dostępne środki do zwrotu dla danej transakcji
+    Refund500Response:
+      properties:
+        error:
+          type: string
+          example: Unknown error
+          description: Komunikat błędu
+        code:
+          type: integer
+          example: 500
+          default: 500
+    TransactionRegisterOfflineRequest:
+      properties:
+        token:
+          type: string
+    TransactionRegistrationOffline200:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+              description: Unique transaction ID assigned by P24
+            sessionId:
+              type: string
+              description: Unique ID assigned by the merchant’s system
+            amount:
+              type: integer
+              description: Transaction amount
+            statement:
+              type: string
+              description: Full payment title
+            iban:
+              type: string
+              description: Number of account for payment
+            ibanOwner:
+              type: string
+              description: Name of payment recipient
+            ibanOwnerAddress:
+              type: string
+              description: Address of payment recipient
+          type: object
+        responseCode:
+          type: number
+          example: 0
+    TransactionRegistrationOffline409:
+      properties:
+        error:
+          type: string
+          default: Unable to create offline transaction
+          example: Unable to create offline transaction
+        code:
+          type: number
+          example: 409
+    ErrorCodeResponse:
+      properties:
+        error:
+          type: string
+          example: Undefined error
+          default: Undefined error
+        code:
+          type: integer
+          example: 500
+          default: 500
+      type: object
+    TranstactionSplitPayment:
+      required:
+        - merchantId
+        - posId
+        - sessionId
+        - amount
+        - currency
+        - descrition
+        - email
+        - country
+        - language
+        - urlReturn
+        - sign
+        - splitPaymentDetails
+      properties:
+        merchantId:
+          name: merchantId
+          in: formData
+          description: ID Merchanta
+          type: integer
+        posId:
+          name: posId
+          in: formData
+          description: ID Sklepu (domyślnie ID merchanta)
+          type: integer
+        sessionId:
+          name: sessionId
+          in: formData
+          description: Unikalny identyfikator z systemu sprzedawcy
+          type: string
+          maxLength: 100
+        amount:
+          name: amount
+          in: formData
+          description: Kwota transakcji wyrażona w groszach, np. 1.23 PLN = 123
+          type: integer
+        currency:
+          name: currency
+          in: formData
+          description: Wartość zgodna z ISO np. PLN
+          type: string
+          maxLength: 3
+          default: PLN
+        description:
+          name: description
+          in: formData
+          description: Opis transakcji
+          type: string
+          maxLength: 1024
+        email:
+          name: email
+          in: formData
+          description: Email Klienta
+          type: string
+          maxLength: 50
+        client:
+          name: client
+          in: formData
+          description: Imię i nazwisko Klienta
+          type: string
+          maxLength: 40
+        address:
+          name: address
+          in: formData
+          description: Adres Klienta
+          type: string
+          maxLength: 80
+        zip:
+          name: zip
+          in: formData
+          description: Kod pocztowy Klienta
+          type: string
+          maxLength: 10
+        city:
+          name: city
+          in: formData
+          description: Miasto Klienta
+          type: string
+          maxLength: 50
+        country:
+          name: country
+          in: formData
+          description: Kody krajów zgodnie ISO, np. PL, DE itp.
+          type: string
+          maxLength: 2
+          default: PL
+        phone:
+          name: phone
+          in: formData
+          description: "Telefon klienta w formacie: 481321132123"
+          type: string
+          maxLength: 12
+        language:
+          name: language
+          in: formData
+          description: "Jeden z następujących kodów krajów zgodnie z normą ISO 639-1: bg, cs, de,
+            en, es, fr, hr, hu, it, nl, pl, pt, se, sk"
+          type: string
+          default: pl
+          maxLength: 2
+        method:
+          name: method
+          in: formData
+          description: Identyfikator metody płatności. Lista metod płatności widoczna w panelu lub dostępna przez API
+          type: integer
+        urlReturn:
+          name: urlReturn
+          in: formData
+          description: Adres powrotny po zakończeniu transakcji
+          type: string
+          maxLength: 250
+        urlStatus:
+          name: urlStatus
+          in: formData
+          description: Adres do przekazania statusu transakcji
+          type: string
+          maxLength: 250
+        timeLimit:
+          name: timeLimit
+          in: formData
+          description: Limit czasu na wykonanie transakcji, 0 - brak limitu, maks. 99 (w minutach)
+          type: integer
+        channel:
+          name: channel
+          in: formData
+          description: "
+                      1 - karty,
+                      2 - przelew,
+                      4 - tradycyjny przelew,
+                      8 -
+                                  N/A,
+                      16 - wszystkie 24/7 – udostępnia wszystkie metody płatności,
+                      32 -
+                                  uzyj przedpłaty,
+                      64 – tylko metody pay-by-link,
+                      128 –
+                                  formy ratalne,
+                      256 – wallety.
+
+                      Aby uruchomić
+                                  poszczególne kanały, nalezy zsumowac ich wartości
+
+                      Przykład:
+
+                      karty i przelew tradycyjny:
+                                  channel=5"
+          type: integer
+          enum:
+            - "1"
+            - "2"
+            - "4"
+            - "8"
+            - "16"
+            - "32"
+            - "64"
+            - "128"
+            - "256"
+        shipping:
+          name: shipping
+          in: formData
+          description: Koszt dostawy/wysyłki
+          type: integer
+        transferLabel:
+          name: transferLabel
+          in: formData
+          description: Opis pojawiający się w tytule przelewu
+          type: string
+          maxLength: 20
+        sdkVersion:
+          name: sdkVersion
+          in: formData
+          description: Wersja bibliotek mobilnych. Określa czy transakcja jest mobilna.
+          type: string
+          maxLength: 10
+        sign:
+          name: sign
+          in: formData
+          type: string
+          maxLength: 100
+          description: <br>Suma kontrolna parametrów:<br>
+            {<font color = "brown">"sessionId":</font>"string",<font color = "brown">"merchantId":</font>int,<font color = "brown">"amount":</font>int,<font color = "brown">"currency":</font>"string",<font color = "brown">"crc":</font>"string"}
+            <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br> przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty<br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+        encoding:
+          name: encoding
+          in: formData
+          description: "System kodowania przesyłanych znaków: ISO-8859-2, UTF-8, Windows-1250"
+          type: string
+          maxLength: 15
+        cart:
+          description: Koszyk
+          items:
+            $ref: "#/components/schemas/CartParameters"
+        methodRefId:
+          name: methodRefId
+          in: formData
+          description: Specjalny parametr wymagany dla niektórych procesów płatności, np. BLIK i Karty one-click.
+          type: string
+          maxLength: 250
+        splitPaymentDetails:
+          items:
+            $ref: "#/components/schemas/SplitPaymentDet"
+    SplitPaymentDet:
+      type: object
+      properties:
+       vatAmount:
+         type: integer
+         description: Kwota podatku VAT
+       invoiceNumber:
+         type: string
+         description: Numer faktury
+       nip:
+         type: string
+         description: Numer identyfikacji podatkowej
+       iban:
+         type: string
+         description: Międzynarodowy numer rachunku bankowego IBAN (international bank account number)
+      required:
+        - vatAmount
+        - invoiceNumber
+        - nip
+    CartParameters:
+      description: Cart Parameters
+      type: object
+      required:
+        - sellerId
+        - sellerCategory
+      properties:
+        sellerId:
+          type: string
+          description: ID Sklepu po stronie Partnera
+        sellerCategory:
+          type: string
+          description: Kategoria sklepu
+        name:
+          type: string
+          description: Nazwa produktu<br/><br/><font color="red">Wymagane dla metody płatności PayPal</font>
+        description:
+          type: string
+          description: Opis produktu<br/><br/><font color="red">Wymagane dla metody płatności PayPal</font>
+        quantity:
+          type: integer
+          description: Ilość produktu<br/><br/><font color="red">Wymagane dla metody płatności PayPal</font>
+        price:
+          type: integer
+          description: Cena produktu<br/><br/><font color="red">Wymagane dla metody płatności PayPal</font>
+        number:
+          type: string
+          description: Numer produktu<br/><br/><font color="red">Wymagane dla metody płatności PayPal</font>
+    TransactionRefundsInfoResponse:
+      properties:
+        data:
+          $ref: "#/components/schemas/TransactionWithRefundsResponse"
+        responseCode:
+          type: number
+          example: 0
+    TransactionWithRefundsResponse:
+      properties:
+        orderId:
+          type: integer
+        sessionId:
+          type: string
+        amount:
+          type: integer
+        currency:
+          type: string
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/RefundsCollection"
+      type: object
+    RefundsCollection:
+      properties:
+        batchId:
+          type: integer
+        requestId:
+          type: string
+        date:
+          type: string
+        login:
+          type: string
+        description:
+          type: string
+        status:
+          type: integer
+          example: 3
+          default: 3
+          description: 1 - zrealizowany,<br/>2 - oczekuje na realizację,<br/>3 - czeka na akceptację P24,<br/>4 - odrzucony
+        amount:
+          type: integer
+      type: object
+    TransactionNotFoundResponse:
+      properties:
+        error:
+          type: string
+          default: Transaction not found
+          example: Transaction not found
+        responseCode:
+          type: number
+          default: 0
+          example: 0
+    InfoResponse:
+      properties:
+        country:
+          type: string
+          default: PL
+        bank:
+          type: string
+          default: PL
+      type: object
+    TransactionBySessionIdSuccessResponse:
+      properties:
+        data:
+          $ref: "#/components/schemas/TransactionBySessionIdResponse"
+        responseCode:
+          type: number
+          default: 0
+      type: object
+    TransactionBySessionIdResponse:
+      properties:
+        statement:
+          type: string
+          description: Transfer title
+        orderId:
+          type: integer
+          description: Transaction ID
+        sessionId:
+          type: string
+          description: Transaction ID assigned by Merchant
+        status:
+          type: integer
+          description: Transaction status. 0 - no payment, 1 - advance payment, 2 - payment made, 3 - payment returned
+        amount:
+          type: integer
+          description: Transaction amount
+        currency:
+          type: string
+          default: PLN
+          description: Transaction currency
+        date:
+          type: string
+          description: Transaction registration date
+        dateOfTransaction:
+          type: string
+          description: Date of payment
+        clientEmail:
+          type: string
+          description: Customer's e-mail
+        accountMD5:
+          type: string
+          description: Customer's hashed bank account number
+        paymentMethod:
+          type: integer
+          description: Payment method ID
+        description:
+          type: string
+          description: Transaction description
+        clientName:
+          type: string
+          description: Customer's first name and surname
+        clientAddress:
+          type: string
+          description: Customer's address
+        clientCity:
+          type: string
+          description: Customer's city
+        clientPostcode:
+          type: string
+          description: Customer's zip code
+        batchId:
+          type: integer
+          description: Batch number in which the transaction was paid
+        fee:
+          type: string
+          default: "0"
+          description: Commission
+    RecurringParams:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Token pozyskany w procesie rejestracji transakcji
+        blikCode:
+          type: string
+          description: 6-cyfrowy, jednorazowy kod BLIK, wygenerowany w aplikacji
+        aliasValue:
+          type: string
+          description: Unikalny alias użytkownika, który może być użyty do obciążenia środków podczas kolejnych transakcji
+        aliasLabel:
+          type: string
+          description:  Etykieta aliasu wyświetlana w aplikacji
+          minLength: 5
+          maxLength: 35
+        recurring:
+          $ref: "#/components/schemas/RecurringParamsIn"
+      required:
+        - token
+        - blikCode
+    RecurringParamsIn:
+      type: object
+      discriminator:
+        propertyName: type
+        mapping:
+          M: '#/components/schemas/RecurringParametersM'
+          A: '#/components/schemas/RecurringParametersA'
+          A+: '#/components/schemas/RecurringParametersA+'
+      properties:
+        type:
+          type: string
+          name: type
+          enum:
+            - M
+            - A
+            - A+
+          description: 'Typ płatności cyklicznej, dozwolone wartości: A, A+, M'
+          in: formData
+          default: M
+        expirationDate:
+          type: string
+          description: 'Data ważności płatności cyklicznej w formacie: YYYY-MM-DDThh:mm:ss'
+        frequency:
+          type: string
+          description: 'Częstotliwość płatności; wartość musi spełnić warunek regex: [1-9][DWMQY][ANP]([0-9]{1,2}|E)'
+        totalLimitAmount:
+          type: integer
+          description: 'Maksymalna łączna kwota na jaką zostaną obciążone środki w trakcie całego procesu'
+        limitAmount:
+          type: integer
+          description: 'Maksymalna kwota pojedynczego obciążenia'
+        totalLimitCount:
+          type: integer
+          description: 'Liczba płatności jaka zostanie wykonana w całym procesie'
+        minimumTime:
+          type: boolean
+          description: 'Parametr kontrolujący flagę min'
+          default: true
+        availableBanks:
+          description: 'Parametr kontrolujący weryfikację tego, czy bank wspiera płatności cykliczne. Wartość false oznacza, że nie zostało sprawdzone czy bank wspiera płatności cykliczne.'
+          type: boolean
+    RecurringParametersA:
+      allOf:
+        - $ref: '#/components/schemas/RecurringParamsIn'
+        - type: object
+          properties:
+            type:
+              type: string
+              name: type
+              enum:
+                - M
+                - A
+                - A+
+              description: 'the type of recurring payment; allowed values: A, A+, M'
+              in: formData
+            expirationDate:
+              type: string
+              description: 'allowed format: YYYY-MM-DD hh:mm:ss'
+            frequency:
+              type: string
+              description: 'frequency of the recurrency; value must fulfill regex: [1-9][DWMQY][ANP]([0-9]{1,2}|E)'
+            totalLimitAmount:
+              type: integer
+              description: 'maximum total amount that will be charged through the process'
+            limitAmount:
+              type: integer
+              description: 'maximum amount that will be charged in a single payment'
+            totalLimitCount:
+              type: integer
+              descrition: 'number of payments that will be issued in the whole process'
+            minimumTime:
+              type: boolean
+              description: 'parameter for controlling the flag min'
+              default: true
+            availableBanks:
+              description: 'parameter to control the verification of whether the bank supports recursion.
+        If set to false, it is not checked if the bank supports recursion.'
+              type: boolean
+          required:
+            - totalLimitCount
+            - expirationDate
+            - totalLimitAmount
+            - limitAmount
+            - frequency
+    RecurringParametersA+:
+      allOf:
+        - $ref: '#/components/schemas/RecurringParamsIn'
+        - type: object
+          properties:
+            type:
+              type: string
+              name: type
+              enum:
+                - A
+                - A+
+                - M
+              description: 'the type of recurring payment; allowed values: A, A+, M'
+              in: formData
+            expirationDate:
+              type: string
+              description: 'allowed format: YYYY-MM-DD hh:mm:ss'
+            frequency:
+              type: string
+              description: 'frequency of the recurrency; value must fulfill regex: [1-9][DWMQY][ANP]([0-9]{1,2}|E)'
+            totalLimitAmount:
+              type: integer
+              description: 'maximum total amount that will be charged through the process'
+            limitAmount:
+              type: integer
+              description: 'maximum amount that will be charged in a single payment'
+            totalLimitCount:
+              type: integer
+              descrition: 'number of payments that will be issued in the whole process'
+            minimumTime:
+              type: boolean
+              description: 'parameter for controlling the flag min'
+              default: true
+            availableBanks:
+              description: 'parameter to control the verification of whether the bank supports recursion.
+        If set to false, it is not checked if the bank supports recursion.'
+              type: boolean
+          required:
+            - totalLimitCount
+            - expirationDate
+            - totalLimitAmount
+            - limitAmount
+            - frequency
+    RecurringParametersM:
+      allOf:
+        - $ref: '#/components/schemas/RecurringParamsIn'
+        - type: object
+          properties:
+            type:
+              type: string
+              name: type
+              enum:
+                - A
+                - A+
+                - M
+              description: 'the type of recurring payment; allowed values: A, A+, M'
+              in: formData
+            expirationDate:
+              type: string
+              description: 'allowed format: YYYY-MM-DD hh:mm:ss'
+            frequency:
+              type: string
+              description: 'frequency of the recurrency; value must fulfill regex: [1-9][DWMQY][ANP]([0-9]{1,2}|E)'
+            totalLimitAmount:
+              type: integer
+              description: 'maximum total amount that will be charged through the process'
+            limitAmount:
+              type: integer
+              description: 'maximum amount that will be charged in a single payment'
+            totalLimitCount:
+              type: integer
+              descrition: 'number of payments that will be issued in the whole process'
+            minimumTime:
+              type: boolean
+              description: 'parameter for controlling the flag min'
+              default: true
+            availableBanks:
+              description: 'parameter to control the verification of whether the bank supports recursion.
+        If set to false, it is not checked if the bank supports recursion.'
+              type: boolean
+          required:
+            - totalLimitCount
+    BlikChargeByCodeResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+            message:
+              type: string
+          type: object
+        responseCode:
+          type: number
+          default: 0
+    BlikOneClick:
+      type: object
+      required:
+        - token
+        - type
+      discriminator:
+        propertyName: type
+        mapping:
+          alias: '#/components/schemas/Alias'
+          alternativeKey: '#/components/schemas/Alternativekey'
+          #blikCode: '#/components/schemas/Blik_Code'
+      properties:
+        token:
+          type: string
+          description: Token pozyskany podczas rejestracji transakcji
+        type:
+          type: string
+        aliasValue:
+          type: string
+          description: <b>Uwaga! Wysłanie parametru spowoduje nadpisanie istniejącego aliasu.</b> <br/> Unikalny alias użytkownika, który może być użyty do obciążenia środków podczas kolejnych transakcji.
+        aliasLabel:
+          type: string
+          description: <b>Uwaga! Wysłanie parametru spowoduje nadpisanie istniejącej etykiety.</b> <br/> Etykieta aliasu wyświetlana w aplikacji
+        recurring:
+          description:
+          $ref: "#/components/schemas/RecurringParamsIn"
+    Alias:
+      description: alias description
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/BlikOneClick'
+        - type: object
+          properties:
+            token:
+              type: string
+              description: Token pozyskany podczas rejestracji transakcji
+            type:
+              type: string
+              description: Ustaw wartość „alias”
+          required:
+            - token
+            - type
+    Alternativekey:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/BlikOneClick'
+        - type: object
+          properties:
+            token:
+              type: string
+              description: Token pozyskany podczas rejestracji transakcji
+            type:
+              type: string
+              description: Ustaw wartość „alternativeKey”
+            alternativeKey:
+              type: string
+              description: Wartość uzyskana jako odpowiedź z chargeByAlias, podczas obciążenia tokenu z "type" = "alias", gdzie przypisana jest więcej niż jedna aplikacja bankowa
+          required:
+            - token
+            - type
+            - alternativeKey
+    # Blik_Code:
+    #   type: object
+    #   allOf:
+    #     - $ref: '#/components/schemas/BlikOneClick'
+    #     - type: object
+    #       properties:
+    #         token:
+    #           type: string
+    #           description: Token pozyskany podczas rejestracji transakcji
+    #         type:
+    #           type: string
+    #           description: Ustaw wartość „blikCode”
+    #         blikCode:
+    #           type: string
+    #           description: Wartość T6 wprowadzona przez klienta.
+    #       required:
+    #         - token
+    #         - type
+    #         - blikCode
+    BlikChargeByAliasResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+            message:
+              type: string
+          type: object
+    ChargeByAlias409:
+      properties:
+        error:
+          type: array
+          items:
+            $ref: "#/components/schemas/ChargeByAlias409Item"
+        code:
+          type: integer
+          example: 51
+    ChargeByAlias409Item:
+      properties:
+        message:
+          type: string
+        alternativeKeys:
+          type: array
+          items:
+            $ref: "#/components/schemas/alternativeKeysItem"
+    alternativeKeysItem:
+      properties:
+        label:
+          type: string
+        alias:
+          type: string
+    cardinfores:
+      properties:
+        data:
+          type: object
+          properties:
+            refId:
+              type: string
+              description: Unikalny token karty (kod referencyjny)
+            bin:
+              type: integer
+              description: Numer BIN karty
+            mask:
+              type: string
+              description: Numer maskowany karty
+            cardType:
+              type: string
+              description: Typ karty (VISA, ECMC)
+            cardDate:
+              type: string
+              description: Data ważności w formacie MMYYYY
+            hash:
+              type: string
+              description: Unikatowy hash karty – unikatowy dla każdej karty              
+        responseCode:
+          type: number
+    CardChargeRequestBody:
+      properties:
+        token:
+          type: string
+          description:  Token zarejestrowany metodą <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>. Numer referencyjny karty musi zostać przekazany w trakcie rejestracji w parametrze  <b>methodRefId</b>
+    ChargeCard3dsSuccessResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+            redirectUrl:
+              type: string
+          type: object
+        responseCode:
+          type: number
+          example: 0
+    ChargeCardSuccessResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+              description: Registered transaction ID
+          type: object
+        responseCode:
+          type: number
+          default: 0
+          example: 0
+    CardRegisterRequestBody:
+      type: object
+      properties:
+        transactionToken:
+          type: string
+          description: Token pozyskany w procesie rejestracji
+        cardNumber:
+          type: string
+          description: Numer karty
+          maxLength: 16
+        cardDate:
+          type: string
+          description: Data ważności w formacie MMYYYY
+        cvv:
+          type: string
+          description: Card CVV
+        clientName:
+          type: string
+          description: Imię i nazwisko posiadacza karty
+      required:
+        - transactionToken
+        - cardNumber
+        - cardDate
+        - cvv
+        - clientName
+    CardPayThreeDSecureResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+            redirectUrl:
+              type: string
+          type: object
+        responseCode:
+          type: number
+          example: 0
+    CardPayResponse409:
+      properties:
+        error:
+          type: string
+          example: Unable to make payment.
+        code:
+          type: number
+    CardPaySuccessResponse:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+            redirectUrl:
+              type: string
+          type: object
+        responseCode:
+          type: number
+          example: 0
+    blikadnotification:
+      properties:
+        email:
+          type: string
+          description: email klienta
+        value:
+          type: string
+          description: wartość aliasu
+        type:
+          type: string
+          description: UID dla 1-click, PAYID dla płatności cyklicznych
+        status:
+          type: string
+          description: REGISTERED / UNREGISTERED / EXPIRED
+    bliknotification:
+      properties:
+        data:
+          properties:
+            orderId:
+              type: integer
+              description: Order ID
+            sessionId:
+              type: string
+              description: ID sesji
+            method:
+              type: integer
+              description: ID metody płatności
+            result:
+              description: Tablica wartości
+              type: object
+              properties:
+                error:
+                  type: string
+                  description: Kod błędu - 0 dla sukcesu
+                message:
+                  type: string
+                  description: Komunikat błędu
+                status:
+                  type: string
+                  description: Status transakcji
+                trxRef:
+                  type: string
+                  description: Numer referencyjny transakcji BLIK
+            sign:
+              type: string
+              description: <br>Suma kontrolna parametrów:<br>
+                {<font color = "brown">"orderId":</font>int,
+                <font color = "brown">"sessionId":</font>"string",
+                <font color = "brown">"method":</font>int,
+                <font color = "brown">"result":</font>array,
+                <font color = "brown">"crc":</font>"string"}
+                <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br> przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+    CardNotificationExtN:
+      properties:
+        amount:
+          type: integer
+          description: Kwota transakcji
+        3ds:
+          type: boolean
+          description: Czy podczas płatności był wykonywany 3ds?
+        method:
+          type: integer
+          description: ID metody płatności
+        orderId:
+          type: integer
+          description: Identyfikator transakcji nadany przez P24 dla dla próbkowania 1-click
+        sessionId:
+          type: string
+          description: ID sesji merchanta
+        errorCode:
+          type: string
+          description: Kod błędu
+        errorMessage:
+          type: string
+          description: Opis błędu. <br> Przed wyliczeniem signa, należy przekształcić wartość parametru w taki sposób, aby znaki alfanumeryczne zostały zamienione na diaktryczne.
+        sign:
+          type: string
+          description: <br>Suma kontrolna parametrów:<br>
+                {<font color = "brown">"amount":</font>int,<font color = "brown">"3ds":</font>boolean,<font color = "brown">"method":</font>int,<font color = "brown">"orderId":</font>int,<font color = "brown">"sessionId":</font>"str",<br/><font color = "brown">"errorCode":</font>"str",<font color = "brown">"errorMessage":</font>"str",<font color = "brown">"crc":</font>"str"}
+                <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">Ważne!:</font></b><br>  w przypadku wykorzystania funkcji json_encode, powinny zostać dodane następujące atrybuty <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+    CardNotificationExt:
+      properties:
+        amount:
+          type: integer
+          description: Kwota transakcji
+        3ds:
+          type: boolean
+          description: Czy podczas płatności był wykonywany 3ds?
+        method:
+          type: integer
+          description: ID metody płatności
+        refId:
+          type: string
+          description: Numer referencyjny karty
+        orderId:
+          type: integer
+          description: Identyfikator transakcji nadany przez P24 dla dla próbkowania 1-click
+        sessionId:
+          type: string
+          description: ID sesji merchanta
+        bin:
+          type: integer
+          description: Numer BIN karty
+        maskedCCNumber:
+          type: string
+          description: Numer maskowany karty
+        ccExp:
+          type: string
+          description: Data ważności karty w formacie MMYYYY np. 122020
+        hash:
+          type: string
+          description: Unikatowy hash karty – unikalny dla każdej karty
+        cardCountry:
+          type: string
+          description: Kod kraju zgodny z ISO, np. PL
+          example: "PL"
+        risk:
+          type: integer
+          description: 0 – bezpieczna, 1 – podejrzana, 2 – niebezpieczna. Wynik obliczany na podstawie narzędzia do oceny ryzyka płatności kartą.
+        liabilityshift:
+          type: boolean
+          description: 1 – Tak, 0 – Nie
+          example: false
+        sign:
+          type: string
+          description: <br>Suma kontrolna parametrów:<br>
+                {<font color = "brown">"amount":</font>int,<font color = "brown">"3ds":</font>boolean,<font color = "brown">"method":</font>int,<font color = "brown">"refId":</font>"str",<font color = "brown">"orderId":</font>int,<font color = "brown">"sessionId":</font>"str",<br/><font color = "brown">"bin":</font>int,<font color = "brown">"maskedCCNumber":</font>"str",<font color = "brown">"ccExp":</font>"str",<font color = "brown">"hash":</font>"str",<br/><font color = "brown">"cardCountry":</font>"str",<font color = "brown">"risk":</font>int,<font color = "brown">"liabilityshift":</font>boolean,<font color = "brown">"crc":</font>"str"}
+                <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">Ważne!:</font></b><br>  w przypadku wykorzystania funkcji json_encode, powinny zostać dodane następujące atrybuty <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+    cardpayjson:
+      properties:
+        cardHolderLabel:
+          type: string
+        cardNumberLabel:
+          type: integer
+        cvvLabel:
+          type: integer
+        expDateLabel:
+          type: string
+        payButtonCaption:
+          type: string
+        threeDSAuthMessage:
+          type: string
+    TransactionRefundResult:
+      type: object
+      properties:
+        orderId:
+          type: integer
+          description: ID zwracanej transakcji w systemie P24
+        sessionId:
+          type: string
+          description: ID zwracanej transakcji w systemie Partnera
+        merchantId:
+          type: integer
+          description: ID Merchanta, na rzecz którego został wykonany zwrot
+        requestId:
+          type: string
+          description: ID żądania zwrotu przekazane w <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1transaction~1refund/post"><b>transaction/refund</b></a>
+        refundsUuid:
+          type: string
+          description: ID żądania zwrotu w systemie Partnera przekazane w <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1transaction~1refund/post"><b>transaction/refund</b></a>
+        amount:
+          type: integer
+          description: Wartość kwoty wykonanego zwrotu wyrażona w groszach
+        currency:
+          type: string
+          example: PLN
+          description: Waluta wykonanego zwrotu
+        timestamp:
+          type: integer
+          description: Czas wysłania notyfikacji w formacie UNIX timestamp
+        status:
+          type: integer
+          description: Status zrealizowanego zwrotu. Parametr zawsze przyjmuej wartość 0, czyli sukces
+          enum:
+            - 0
+        sign:
+          type: string
+          description: <br>Suma kontrolna parametrów:<br>
+            {<font color = "brown">"orderId":</font>int,<font color = "brown">"sessionId":</font>"str",<font color = "brown">"refundsUuid":</font>"str",<font color = "brown">"merchantId":</font>int,<font color = "brown">"amount":</font>int,<br/><font color = "brown">"currency":</font>"str",<font color = "brown">"status":</font>int,<font color = "brown">"crc":</font>"str"}
+            <br><br> liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br>  przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+    TransactionResult:
+      type: object
+      properties:
+        merchantId:
+          name: merchantId
+          in: formData
+          description: ID Merchanta
+          type: integer
+        posId:
+          name: posId
+          in: formData
+          description: ID Sklepu (domyślnie ID Merchanta)
+          type: integer
+        sessionId:
+          name: sessionId
+          in: formData
+          description: Unikalny identyfikator z systemu sprzedawcy
+          type: string
+          maxLength: 100
+        amount:
+          name: amount
+          in: formData
+          description: Wartość opłaconej transakcji wyrażona w groszach, np. 1.23 PLN = 123
+          type: integer
+        originAmount:
+          name: originAmount
+          in: formData
+          description: Wartość transakcji podczas rejestracji tokenu wyrażona w groszach, np. 1.23 PLN = 123
+          type: integer
+        currency:
+          name: currency
+          in: formData
+          description: Wartość zgodna z ISO np. PLN
+          type: string
+          maxLength: 3
+          default: PLN
+        orderId:
+          name: orderId
+          in: formData
+          description: Numer transakcji przypisany przez P24
+          type: integer
+        methodId:
+          name: methodId
+          in: formData
+          description: Metoda płatności, z której skorzystał klient
+          type: integer
+        statement:
+          name: statement
+          in: formData
+          description: Tytuł płatności
+          type: string
+        sign:
+          name: sign
+          in: formData
+          description: <br>Suma kontrolna parametrów:<br>
+            {<font color = "brown">"merchantId":</font>int,<font color = "brown">"posId":</font>int,<font color = "brown">"sessionId":</font>"string",<font color = "brown">"amount":</font>int,<font color = "brown">"originAmount":</font>int,<font color = "brown">"currency":</font>"string",
+            <font color = "brown">"orderId":</font>int,<font color = "brown">"methodId":</font>int,<font color = "brown">"statement":</font>"string",<font color = "brown">"crc":</font>"string"}
+            <br><br>liczona z użyciem sha384<br><br> <b><font color = "#DB2053">WAŻNE!:</font></b><br> przy wykorzystaniu funkcji json_encode należy dodać następujące atrybuty
+            <br> "JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES"
+          type: string
+####end components####
+
+####descriptions####
+tags:
+####ADDITIONAL API####
+  - name: Transaction service API
+    x-displayName: Obsługa transakcji API
+  - name: Additional API functionality
+    x-displayName: Dodatkowa funkcjonalność API
+  - name: Notification
+    x-displayName: Notyfikacja
+    description:
+      <div id="PP">
+      <h2>Wynik transakcji</h2>
+
+      <SchemaDefinition schemaRef="#/components/schemas/TransactionResult" />
+
+      <h2>Automatyczne przekazywanie wyniku transakcji</h2>
+      W sytuacji, gdy pierwsze powiadomienie o wyniku transakcji nie zostanie poprawnie odebrane przez system sprzedawcy (nie wykona on prawidłowej weryfikacji), system P24 wyśle kolejne powiadomienia. Powiadomienia zostaną wysłane po 3, 5, 15, 30, 60, 150 i 450 minutach (+/- 5 min.), chyba że wcześniej nastąpi prawidłowa weryfikacja transakcji.<br><br>Parametry <b>POST</b> są takie same, jak w przypadku pierwszego powiadomienia.
+      </div>
+
+  - name: RefundNotification
+    x-displayName: Notyfikacja o zwrocie
+    description:
+      <div id="PP">
+      <h2>Wynik zwrotu</h2>
+
+      Notyfikacja o zwrocie wysyłana jest dla poprawnie zrealizowanego zwrotu. Notyfikacja wysyłana jest w sposób asynchroniczny na adres URL podany w żądaniu wykonania zwrotu <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1transaction~1refund/post"><b>transaction/refund</b></a> w parametrze <b>urlStatus</b>. Jeśli nie zostanie przekazana wartość w <b>urlStatus</b>, to notyfikacja zostanie przesłana na domyślny adres ustawiony w panelu P24 (o ile taki adres został skonfigurowany).
+      <br/><br/>
+      <div id="note"> Aby skonfigurować domyślny adres URL w panelu, proszę o kontakt z Biurem Obsługi Klienta:<br/> partner@przelewy24.pl, tel. +48 61 642 93 45.</div><br>
+
+      <SchemaDefinition schemaRef="#/components/schemas/TransactionRefundResult" />
+      </div>
+####END ADDITIONAL API####
+
+####BLIK####
+  - name: BLIK Use Cases
+    x-displayName: Przypadki użycia BLIK
+    description: >
+
+
+       # Wprowadzenie
+
+       Oprócz standardowej płatności bazującej na przekierowaniu do paymanetwall P24, na stronie Merchanta można również umieścić płatności BLIK.
+
+       # Jak umieścić płatności BLIK na stronie Merchanta? (BLIK level 0)
+
+       Po zarejestrowaniu transakcji z użyciem metody <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b> transaction/register</b></a>, wywołujemy metodę <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByCode/post"><b>paymentMethod/blik/chargeByCode</b></a>, z obowiązkowym wykorzystaniem parametrów <b>“token”</b> (zwracany w odpowiedzi z rejestracji transakcji) i <b>“blikCode”</b> (wpisany przez użytkownika).
+
+       <!--Transakcję można zrealizować poprzez metodę <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByCode/post"><b>paymentMethod/blik/chargeByCode</b></a>. Konieczne jest uprzednie zarejestrowanie transakcji z użyciem metody<a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b> transaction/register</b></a>. W tym przypadku tylko parametry <b>“token”</b> i <b>“blikCode”</b> są obowiązkowe.<br><br><br>-->
+
+       <img src="get.php?file=WHITE_LABEL_1_9.png" alt="Blik OneClick" class="center"><br><br><br>
+
+
+
+         <img src="get.php?file=00_blik.png" alt="Blik" class="center">
+
+       # Co to jest płatność BLIK 1-click?
+
+       Jak sama nazwa sugeruje, płatność pozwala na wykonanie zakupu jednym kliknięciem. Nie wymaga to przepisania kodu BLIK, jedynie proste potwierdzenie w aplikacji mobilnej jednym kliknięciem.<br><br><br>
+
+       <img src="get.php?file=ONE_CLICK_3.png" alt="Blik OneClick" class="center">
+
+
+
+        # Jak uzyskać informacje o aliasie?
+
+        Są dwa sposoby na uzyskanie informacji o aliasie:
+        <ol>
+        <li> Pozyskanie informacji poprzez obsłużenie <a href="#tag/Alias-Update-Notification"><b>dodatkowej notyfikacji.</b></a> (zalecane)</li>
+
+        <li> W celu otrzymania aliasu dla kolejnych płatności, wywołaj metodę <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}/get"><b>getAliasesByEmail</b></a>.<br>
+           Metoda zwraca listę aliasów (razem z typem i statusem) utworzonych dla danego adresu w zakresie danego merchanta.<br>
+           Dla aliasów zarejestrowanych z parametrami <b>values</b> wywołaj metodę <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}~1custom/get"><b>getAliasesByEmail{email}/custom</b></a></li><br/>
+
+
+
+        <div id="note">W związku z asynchronicznym charakterem przetwarzania statusu transakcji, czas zwrócenia aktualnego statusu aliasów przez metodę <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}/get"><b>getAliasesByEmail</b></a> może wynieść do 60 sekund po poprawnie dokonanej transakcji.</div>
+
+
+
+       # Jak zarejestrować alias do wykorzystania w płatnościach 1-click?
+
+       Transakcję można przetworzyć metodą <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByCode/post"><b>paymentMethod/blik/chargeByCode</b></a>. Usługa pozwala na przypisanie indywidualnych wartości <b>alias value</b> i <b>alias label</b> w parametrach wejściowych.
+
+       Jeśli w procesie rejestracji transakcji parametr <b>“referenceRegister” = true</b>, to żądanie rejestracji aliasu zostanie przekazane do systemu BLIK, a klient otrzyma zaproszenie, wygenerowane przez aplikacje bankową, do płatności bez kodu T6 w sklepie merchanta.
+
+
+       Po wywołaniu tej metody, powstanie obciążenie na kwotę przekazaną w rejestracji transakcji i zostanie zarejestrowany alias w systemie P24/BLIK.
+
+
+       Utworzony alias może być wykorzystywany do przetwarzania płatności typu OneClick.
+
+
+       Po zarejestrowaniu aliasu, klient nie będzie proszony o wprowadzanie kodu T6 podczas następnych płatności. <br><br><br>
+
+
+       <img src="get.php?file=000_blik_rejestracja_aliasu.png" alt="Blik" class="center"><br><br><br>
+
+        <div id="note">W celu zarejestrowania innej aplikacji mobilnej w systemie BLIK, należy skorzystać z metody <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByCode/post"><b>paymentMethod/blik/chargeByCode</b></a> wraz z 6-cyfrowym kodem BLIK, wygenerowanym przez aplikację. W systemie P24 transakcja musi być zarejestrowana na ten sam adres e-mail klienta.</div>
+
+        <br>
+
+        <div id="note"> Alias tworzony jest na podstawie adresu e-mail przekazanego w procesie rejestracji. Oznacza to, że o ile nie zostały wykorzystane parametry “aliasValue” i “aliasLabel”, to na ten sam adres e-mail może być zarejestrowany tylko jeden alias danego typu.</div>
+
+        <br>
+
+        <div id="note">Aby zarejestrować więcej niż jeden alias dla danego adresu e-mail, należy skorzystać z alias value i alias label. W ten sposób merchant zapewni, że aliasy są unikalne. Lista aliasów merchanta może być pozyskana za pomocą metody <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}/get"><b>getAliasesByEmail</b></a>. Możliwe jest rejestrowanie tego samego aliasu zdefiniowanego przez merchanta dla kilku różnych adresów e-mail. W tym przypadku metoda <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}/get"><b>getAliasesByEmail</b></a> zwraca ten sam alias dla każdego z adresów e-mail.</div>
+
+        # Jak wykonać płatność 1-click (tylko 1-click)?
+
+        <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByAlias/post"><b>ChargeByAlias</b></a> jest metodą płatności typu one click. Pozwala na obciążenie klienta korzystając z uprzednio pozyskanego aliasu. Pozyskany alias musi być przekazany w parametrze  <i><b>methodRefId</i></b> w trakcie rejestracji transakcji(<a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>). Ustaw typ <i><b>type=alias</i></b>.<br><br><br>
+
+
+        <img src="get.php?file=pl_blik_platnosc_z_aliasem.png" alt="Blik" class="center"><br>
+
+        # Jak obsłużyć dwie zarejestrowane aplikacje na jeden alias (tylko 1-click)?
+
+        Metoda<a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByAlias/post"><b>ChargeByAlias</b></a> służy do wykonywania obciążeń środków klienta za pomocą wcześniej pobranego aliasu wraz z podaniem <b><i><b>“alternativeKey”</b></b></i>  klucza identyfikującego aplikację mobilną klienta Pojawia się dodatkowy parametr <i><b>"alternativeKey"</b></i>.<br><br>
+        Metodę należy wykonywać tylko w przypadku otrzymania odpowiedzi z metody
+        <b>chargeByAlias</b> z typem „alias” z kodem błędu 51 i httpcode 409 (Wybrany alias do identyfikacji jest niejednoznaczny!) i z listą alternatywnych kluczy identyfikujących aplikacje mobilne klienta – <i><b>"AliasAlternative"</b></i>.
+        <br><br>
+        Klient powinien wybrać aplikację mobilną, z której zostanie dokonane obciążenie. Alias powinien zostac wybrany z listy
+        the <i><b>"AliasAlternative"</b></i>.
+        <br><br>
+        Metoda z typem
+        <i><b>"alternativeKey"</b></i> ” będzie wykorzystywana tylko w przypadku, gdy klient posiada więcej niż jedną aplikację mobilną podpiętą pod ten sam alias typu UID.
+        <br><br>
+        Podczas obsługi błędu 51 sprzedawca nie powinien zapisywać alternatywnych kluczy i labeli. Dane te ulegają zmianie na poziomie bank / użytkownik aplikacji bankowej. <br><br><br>
+
+        <img src="get.php?file=pl_blik_2app_1_alias.png" alt="Blik" class="center"><br>
+
+
+        # Jak poradzić sobie z przeterminowanym aliasem (tylko 1-click)?
+
+        <!--Metoda <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1chargeByAlias/post"><b>ChargeByAlias</b></a> pozwala na obciążenie środków klienta, korzystając z uprzednio zarejestrowanego aliasu oraz 6-cyfrowego kodu BLIK, wygenerowanego przez aplikację bankową użytkownika.
+        <br><br>
+        Metodę z typem <i><b>"blikCode"</b></i> należy wykonywać w przypadku:
+       <ol>
+        <li> Gdy transakcja zostanie odrzucona z powodu błędu 68 (przedawnienia aliasu klienta). </li>
+
+        <li> Gdy klient, mimo że ma zapamiętany alias wymusi płatność z użyciem kodu BLIK (np. W przypadku gdy chce zarejestrować istniejący alias w innej aplikacji / banku). Należy w takim przypadku podać 6-cyfrowy kod BLIK w celu potwierdzenia autentyczności aliasu.</li></ol><br/>
+
+
+        <img src="get.php?file=pl_blik_platnosc_ponowna_t6.png" alt="Blik" class="center"><br> -->
+
+        Gdy transakcja zostanie odrzucona z powodu błędu 68 (przedawnienia aliasu klienta), należy zarejestrować ponownie transakcję wraz z nowym aliasem - zgodnie z informacjami zawartymi w sekcji o <a href="#section/Jak-zarejestrowac-alias-do-wykorzystania-w-platnosciach-1-click"><b>rejestracji aliasu</b></a>.<br>
+        <img src="get.php?file=pl_blik_wygasniecie_aliasu.png" alt="Blik" class="center"><br>
+
+
+
+       # Tytuł przelewu widoczny w aplikacji klienta?
+
+       Domyślnie, w aplikacji bankowej klienta, jako główny tytuł widoczny jest numer transakcji P24. Dodatkowe linie pokazują równiez informacje przesłane w parametrze  <b>description</b> w żądaniu <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>, jako pomocnicze dane.<br><br>
+       Klient może również zobaczyć spersonalizowaną wartość przesłaną przez merchanta, zamiast numeru transkacji P24 w głównym tytule. W tym przypadku żądanie <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a> powinno zawierać parametr <b>transferLabel</b>, który nadpisze główny tytuł przelewu.<hr>
+  - name: BLIK Additional
+    x-displayName: Dodatkowa notyfikacja BLIK
+    description: >
+      Dla dowolnych transakcji realizowanych przez BLIK, została wprowadzona opcjonalna dodatkowa notyfikacja o statusie płatności.<br><br>
+      Notyfikacja jest wysyłana na adres z parametru <b>"urlCardPaymentNotification"</b>, który należy dodać do metody<a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b> transaction/register </b></a> lub na stały zapisany adres w konfiguracji konta P24.  Nadrzędna jest wartość z tokenu, jeżeli została przesłana.
+
+      <SchemaDefinition schemaRef="#/components/schemas/bliknotification" />
+  - name: Alias Update Notification
+    x-displayName: Notyfikacja uaktualnienia aliasu
+    description: >
+      Dodatkowa notyfikacja może być wysłana na określony adres URL, jeśli status został utworzony lub zmieniony. Adres jest konfigurowany poprzez usługę P24. Notyfikacja może być wykorzystana jako alternatywa do metody <a href="#tag/BLIK-API/paths/~1api~1v1~1paymentMethod~1blik~1getAliasesByEmail~1{email}/get"><b>getAliasesByEmail</b></a>.
+
+      <SchemaDefinition schemaRef="#/components/schemas/blikadnotification" />
+####END BLIK####
+
+####CARD####
+  - name: Card Description
+    x-displayName: Przypadki użycia płatności kartą
+    description:  >
+
+
+      <h2>Wprowadzenie</h2>
+
+
+      Do realizacji standardowych transakcji kartowych procesowanych poprzez paymentwall P24 wystarczy wykonać standardową integrację (payment service) i nie ma konieczności implementowania poniższych rozwiązań. Opisane poniżej rozwiązania są dodatkowymi funkcjonalnościami kartowymi.
+
+
+      <div id="note"> 
+      
+      Funkcjonalności kartowe nie są domyślnie włączone, a ich zakres oraz sposób i możliwości testowania są zależne od Operatora. Skontaktuj się z Działem Obsługi Technicznej (support@przelewy24.pl), aby uzyskać więcej informacji. 
+      
+      </div>
+      
+
+      # Jak uruchomić płatność kartą wewnątrz sklepu?
+
+      Aby ograniczyć liczbę kroków procesu płatności, można umieścić formularz kartowy bezpośrednio na stronie sklepu. Implementacja rozwiązania nie wpływa na przetwarzanie danych kartowych - dane są nadal przetwarzane wyłącznie przez Przelewy24, co pozwala zachować wszystkie wymagania związane z bezpieczeństwem kart kredytowych i zachowuje zgodność ze standardem PCI DSS.
+
+
+      <img src="get.php?file=WHITE_LABEL_1_5.png" alt="Card Payment" class="center">
+
+
+
+      W celu wykonania płatności za pomocą kart płatniczych, konieczne jest zarejestrowanie transakcji w systemie Przelewy24 z użycie metody <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>, a następnie przekazanie otrzymanego tokenu do wywołania w skrypcie JS Przelewy24. Dane wprowadzone w formularzu zostaną przekazane bespośrednio do systemu Przelewy24, w wyniku czego aktywowany zostanie skrypt (wskazany w konfiguracji) po stronie sklepu.
+
+
+      <div id="note"> Do realizacji płatności za pomocą kart po stronie sklepu wymagana jest odpowiednia umowa – proszę o kontakt z Działem Handlowym Przelewy24 (partner@przelewy24.pl , +48 61 642 93 45). </div>
+
+
+
+      <h2>Proces płatności kartą wewnątrz sklepu </h2>
+
+
+      <img src="get.php?file=pl_inshop_card_payment.png" alt="Card payment" class="center"><br/><br/>
+
+
+      - Rejestracja transakcji poprzez metodę <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b> transaction/register </b></a> i pobranie Tokenu transakcji
+
+      - Przygotowanie elementu DIV w treści strony, gdzie ma zostać zamieszczony formularz płatności kartą
+
+      - Przygotowanie skryptu Javascript, który zostanie wywołany po zakończeniu transakcji
+
+
+      <h2> Przygotowanie pola do zamieszczenia formularza rejestracji karty </h2>
+
+      Do przygotowania miejsca na stronie, gdzie ma zostać wyświetlony formularz rejestracji karty można wykorzystać tag DIV. Atrybut ID tego elementu należy ustawić na wartość "P24FormContainer". Kod pola wygląda następująco:
+
+
+      ```html
+        <div
+          id="P24FormContainer"
+          data-sign="{P24SIGN}"
+          data-successCallback="{FinishPaymentFunction}"
+          data-failureCallback="{PaymentErrorFunction}"
+          data-dictionary='{DICTIONARY JSON}' >
+        </div>
+      ```
+
+
+      Gdzie:
+
+      - {P24SIGN} – suma kontrolna taka sama, jak użyta w żądaniu <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>
+
+      - {FinishpaymentFunction} – nazwa funkcji wywołanej w przypadku poprawnej transakcji z jednym parametrem wejściowym - ID transakcji (integer) nadanym przez Przelewy24
+
+      - {PaymentErrorFunction} – nazwa funkcji wywołanej w przypadku błędnej transakcji, funkcja przyjmuje jeden parametr - kod błędu (integer)
+
+      - {DICTIONARY JSON} – słownik terminów użytych w formularzu płatności, jak poniżej:
+
+
+      <SchemaDefinition schemaRef="#/components/schemas/cardpayjson" />
+
+
+      Skrypt generujący formularz w wewnątrz DIV#P24FormContainer należy załączyć do strony:<br/>
+
+      <table border="0 px">
+        <tr>
+          <th bgcolor = "#0f6ab4"><font color = "white"><b>GET</b></font></th>
+          <th bgcolor = "E7F0F7"><a href= 'https://secure.przelewy24.pl/inchtml/ajaxPayment/ajax.js?token={TOKEN}'>https://secure.przelewy24.pl/inchtml/ajaxPayment/ajax.js?token={TOKEN}</a></th>
+        </tr>
+      </table>
+
+      Gdzie, w miejsce {TOKEN} należy wstawić Token otrzymany w wyniku działania metody <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>transaction/register</b></a>. Opcjonalnie można wykorzystać style CSS dla formularza rejestracji karty, lub alternatywnie zastosować własne.
+
+      <br>Adres URL domyślnych styli:<br/>
+
+
+      <a href="https://secure.przelewy24.pl/inchtml/ajaxPayment/ajax.css">https://secure.przelewy24.pl/inchtml/ajaxPayment/ajax.css</a>
+
+
+      W przypadku transakcji wymagającej dodatkowej autoryzacji (3DSecure) po wypełnieniu formularza na stronie pojawi się link prowadzący do nowego okna z formularzem autoryzacji (np. wpisanie SMSa wysłanego z banku). Po poprawnej autoryzacji okno zostanie zamknięte i nastąpi wywołanie funkcji Javascript dla poprawnej transakcji.<br/><br/>
+
+      Adres powrotny przekazany w parametrze <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>"urlReturn"</b></a>  powinien prowadzić do skryptu zamieszczonego na tej samej domenie co skrypt żądania. Powinien on uruchamiać następującą funkcję:
+
+      ```javascript
+        window.setTimeout(function(){
+        opener.P24_Transaction.threeDSReturn(window);
+        window.close();
+        },1000);
+      ```
+
+
+      # Jak zarejestrować kartę lub wykonać płatność?
+
+      1. Rejestrację karty należy wykonać jak przy zwykłej płatności.
+
+      Płatność kartą można wykonać na 3 sposoby:
+
+        - <a href="#section/System-platnosci"><b>paymentwall p24</b></a>
+
+        - <a href="#tag/Card-API/paths/~1api~1v1~1card~1pay/post"><b>bezpośrednie API  (card / pay)</b></a> - jeżeli dane kartowe są procesowane przez zasoby Merchanta, rozwiązanie wymaga PCI DSS
+        <img src="get.php?file=white_label_MOBILE_3_a.png" alt="Card Payment" class="center">
+
+
+
+        - <a href="#section/Jak-uruchomic-platnosc-karta-wewnatrz-sklepu"><b>formularz wewnątrz sklepu </b></a>
+
+        <img src="get.php?file=WHITE_LABEL_1_5.png" alt="Card Payment" class="center">
+
+
+
+
+      2. Następnie poprzez<a href="#tag/Card-API/paths/~1api~1v1~1card~1info~1{orderId}/get"><b> card/info </b></a> lub <a href="#tag/Card-Notification"><b>dodatkową notyfikację</b></a>, można pobrać informację o karcie, w tym numer referencyjny, niezbędny do późniejszych obciążeń.
+
+
+      3. Następnie, w zależności od tego, czy chcemy przyjąć płatność, wykonujemy <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1verify/put"><b> transaction/verify </b></a> lub <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1verify/put"><b> transaction/verify </b></a> a następnie <a href="#tag/Additional-API-functionality/paths/~1api~1v1~1transaction~1refund/post"><b> transaction/refund </b></a>, jeżeli była to tylko płatność do próbkowania np. na 1 PLN.
+
+      <img src="get.php?file=pl_inshop_card_payment.png" alt="card pay" class="center">
+
+
+      # Jak pozyskać informacje o karcie?
+
+
+      Są dwa sposoby na pozyskanie informacji na temat karty:
+
+        - Wywołać metodę <a href="#tag/Card-API/paths/~1api~1v1~1card~1info~1{orderId}/get"><b> card/info </b></a>
+
+        - Obsłużyć dodatkową <a href="#tag/Card-Notification"><b>notyfikację kartową</b></a>
+
+
+      Dla dowolnych transakcji kartowych notyfikacja może zostać użyta:
+
+        - w procesie <a href="#tag/Card-API/paths/~1api~1v1~1card~1chargeWith3ds/post"><b>card/chargeWith3ds</b></a>, <a href="#tag/Card-API/paths/~1api~1v1~1card~1charge/post"><b>card/charge</b></a>, <a href="#tag/Card-API/paths/~1api~1v1~1card~1pay/post"><b>card/pay</b></a> opartym o REST, aby móc natychmiastowo wyświetlić komunikat klientowi o udanej/nieudanej transakcji
+        - w procesie RISK po stronie Partnera, dla sprawdzenia karty klienta i uchronienia się przez fraudami
+
+        - w przypadku zapisywania karty do procesu 1-click, nie ma konieczności dodatkowego wykonywania zapytania o numer referencyjny karty
+
+
+      <img src="get.php?file=pl_1_click.png" alt="OneClick" class="center">
+
+
+      # Jak wykonać płatność 1-click z 3ds?
+
+      Do tego celu służy dedykowana metoda <a href="#tag/Card-API/paths/~1api~1v1~1card~1chargeWith3ds/post"><b>card/chargeWith3ds</b></a><br><br>
+      Numer referencyjny karty musi zostać przekazany podczas rejestracji transakcji w parametrze <b>methodRefId</b>.<br><br>
+      Metoda zwróci link do przekierowania klienta i obsłużenia 3ds.<br><br>
+
+      <br><br>
+      <img src="get.php?file=ONE_CLICK_4.png" alt="OneClick" class="center"><br><br>
+      <br><br>
+
+      <img src="get.php?file=pl_1_click_3ds.png" alt="OneClick 3ds" class="center">
+
+
+      # Jak obsłużyć płatności bez udziału klienta (płatności rekurencyjne)?
+
+      Metoda <a href="#tag/Card-API/paths/~1api~1v1~1card~1charge/post"><b>card/charge</b></a> umożliwia rekurencyjne obciążanie karty na podstawie przekazanego numeru referencyjnego. <br><br>
+      Numer referencyjny karty musi zostać przekazany podczas rejestracji transakcji w parametrze <b>methodRefId</b>.<br><br>
+      Do zainicjowania procesu nie jest wymagany udział klienta.<br><br>
+
+      <img src="get.php?file=pl_1_click_recurringv1.png" alt="Recurring Charge" class="center">
+      <br><br>
+
+      <img src="get.php?file=ONE_CLICK_4.png" alt="OneClick" class="center"><br><br>
+
+      # Jak obsłużyć 3ds (w tym 3ds 2.X)?
+
+      Zarówno 3ds jak i 3ds 2.X obsługiwane są w ten sam sposób. Dla rozwiązania opartego o <a href="#section/System-platnosci"><b>paymentwall p24</b></a> czy formatkę wewnątrz sklepu, 3ds obsługiwany jest automatycznie.
+      <br><br> W trakcie procesu rejestracji usługa 3D-Secure może być uruchomiona (domyślnie wyłączona). W przypadku gdy jest włączona, wysyłana jest dodatkowa notyfikacja zawierająca adres przekierowania do 3D-Secure (do zdefiniowania w panelu P24). <br/><br/>
+      W przypadku skorzystania z metody <a href="#tag/Card-API/paths/~1api~1v1~1card~1pay/post"><b>card/pay</b></a> lub <a href="#tag/Card-API/paths/~1api~1v1~1card~1chargeWith3ds/post"><b>card/chargeWith3ds</b></a> przekierowanie należy wykonać samemu, na adres URL uzyskany z odpowiedzi.<br><br>
+      Pamiętaj, że po wykonaniu 3ds, klient zawsze zostanie przekierowany na stronę <b>urlReturn</b>. Merchant musi przeprocesowac powrót klienta ze strony banku do sklepu. Zwrócony link jest aktywny przez 15 minut.<br><br>
+
+      # Jak zarejestrować kartę lub zapłacić w aplikacji mobilnej?
+
+      Rejestrację karty lub płatność w aplikacji mobilnej można dokonać na dwa sugerowane sposoby. Można otworzyć <a href="#section/System-platnosci"><b>paymentwall p24</b></a> w WebView, najlepiej z wymuszoną formą płatności dla danych kart. Innym sposobem jest wykorzystanie metody  <a href="#tag/Card-API/paths/~1api~1v1~1card~1pay/post"><b>card/pay</b></a>. Należy pamiętać, aby metoda <a href="#tag/Card-API/paths/~1api~1v1~1card~1pay/post"><b>card/pay</b></a> była wywołana bezpośrednio z aplikacji do P24 bez udziału serwerów Merchanta. W innym przypadku niezbędne będzie posiadanie certyfikatu PCI DSS.
+
+      # Czy Merchant będzie przetwarzał pełne dane karty?
+
+      Do przetwarzania pełnych danych kartowych niezbędny jest certyfikat PCI DSS. Rozwiązania P24 wspierają operacje wykonywane w ten sposób.<br><br>
+      Jednakże istnieje szereg rozwiązań zapewniających merchantowi pełną funkcjonalność kartową, w których nie będzie posługiwał się pełnymi danymi kartowymi i nie ma potrzeby posiadania PCI DSS. W takich sytuacjach Merchant pozyskuje jedynie numer referencyjny karty służący, np. do późniejszych obciążeń typu 1-click czy recurring, oraz zestaw niewrażliwych danych, tj. data ważności czy BIN.<br><br><hr>
+
+  - name: Card Notification
+    x-displayName: Dodatkowa notyfikacja kartowa
+    description:  >
+
+         Notyfikacja jest wysyłana na adres z parametru <b>"urlCardPaymentNotification"</b>, który należy dodać do metody<a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b> transaction/register </b></a> lub na stały zapisany adres w konfiguracji konta P24.  Nadrzędna jest wartość z tokenu, jeżeli została przesłana.
+
+          **Parametry dla pozytywnej autoryzacji**
+
+          <SchemaDefinition schemaRef="#/components/schemas/CardNotificationExt" />
+
+          **Parametry dla negatywnej autoryzacji**
+
+          <SchemaDefinition schemaRef="#/components/schemas/CardNotificationExtN" />
+  - name: Card API
+    x-displayName: Karty API
+####END CARD####
+
+####GPAY####
+  - name: GPay Description
+    x-displayName: Opis Google Pay
+    description:  >
+
+      <img src="get.php?file=Gpay_logo.png" alt="GPay" class="center">
+
+
+      Google Pay to szybki i prosty sposób płatności od Google. Dane karty są przechowywane bezpiecznie na serwerach firmy Google i pozwalają użytkownikowi wykonać proces płatności bez potrzeby manualnego wypełniania formularza kartowego lub kontaktowego.
+
+      <br><br>
+      Google Pay to produkt pozwalający na uzyskanie zaszyfrowanych danych karty płatniczej klienta umożliwiających obciążenie. Aby wykonać płatność przez Google Pay klient wcześniej musi zapisać kartę płatniczą pod swoim kontem Google, używając jakiejkolwiek platformy Google (np. kupując aplikację w Google Play, płacąc za przestrzeń dyskową na Google Drive, przypisując kartę do swojego konta AdWords) lub bezpośrednio na stronie  <a href="https://pay.google.com">https://pay.google.com</a>
+      <br><br>
+      <div id="note"> Usługa wymaga wcześniejszego podpisania umowy z operatorem kartowym. Aby uruchomić funkcjonalność, proszę o kontakt Biurem Obsługi Klienta: partner@przelewy24.pl, tel. +48 61 642 93 45.</div><br>
+
+      <img src="get.php?file=ONE_CLICK_33.png" alt="GPay" class="center">
+
+      ## Schemat komunikacji Google Pay
+        Po kliknięciu w przycisk "Zapłać z Google Pay" klientowi pojawia się na ekranie formatka Google Pay, na której potwierdza swoje konto Google i kartę, którą ma zamiar zapłacić (może również na tym etapie zmienić kartę na inną wcześniej zapisaną, lub dodać nową). Skrypt w tle przekazuje zakodowane dane karty przez funkcję postMessage, którą sklep musi przejąć, a następnie zakodować przez funkcję base64 ponownie i przesłać w parametrze methodRefId wraz z danymi transakcji.<br><br>
+
+        Sklep na swojej stronie musi wywołać skrypt udostępniony przez Google. Szczegóły dostępne pod adresem&#x3A;<br><br>
+        <a href=https://developers.google.com/pay/api/web/guides/tutorial>https://developers.google.com/pay/api/web/guides/tutorial</a><br><br>
+
+        Aby dodać Przelewy24 należy w wywołaniu skryptu zmodyfikować dane Procesora&#x3A;
+
+        ```javascript
+          var tokenizationSpecification =
+          {
+          tokenizationType: 'PAYMENT_GATEWAY',
+          parameters:
+            {
+              gateway: 'przelewy24',
+              gatewayMerchantId: '[MerchantID from P24]'
+            }
+          }
+        ```
+      ## Rejestracja transakcji
+
+        Rejestracja transakcji przez Google Pay polega na dodaniu dodatkowego parametru <b>"methodRefId"</b> z danymi otrzymanymi z Google przez **postMessage (paymentMethodToken.token)** i zakodowaniu ich funkcją base64.
+
+        <table border="0 px">
+          <tr>
+            <th bgcolor = "#9FFF9F"><font color = "black"><b>POST</b></font></th>
+            <th bgcolor = "#B8F0D0"><a href= 'https://secure.przelewy24.pl/api/v1/transaction/register'>https://secure.przelewy24.pl/api/v1/transaction/register</a></th>
+          </tr>
+          </table>
+
+        Dodatkowy parametr <b>POST</b> wywołania
+
+        | Field name   |      Type      |  Required | Description |
+        |--------------|:--------------:|----------:|------------:|
+        | methodRefId  |     STRING     | Y     |Token otrzymany z Google Pay zakodowany funkcją base64|
+
+        Przed wysłaniem żądania transakcji należy zapisać jej dane do lokalnej bazy danych sprzedawcy. W szczególności należy zachować informacje o identyfikatorze sesji i kwocie transakcji.
+      ## Implementacja dla systemu Android
+        Aby zaimplementować Google Pay na urządzeniach z systemem Android zapoznaj się z dokumentacja Google Pay API:
+        [https://developers.google.com/pay/api/android](https://developers.google.com/pay/api/android)
+
+      ## Informacje dodatkowe
+        Dla uspójnienia stylistyki stosowanej na stronie www oraz w aplikacji mobilnej udostępniony został zestaw dedykowanych wskazówek:
+        [https://developers.google.com/pay/api/web/guides/brand-guidelines](https://developers.google.com/pay/api/web/guides/brand-guidelines)
+
+        Zalecenia do tworzenia aplikacji mobilnych dostępne sa pod adresem:
+        [https://developers.google.com/pay/api/android/guides/tutorial](https://developers.google.com/pay/api/android/guides/tutorial)
+
+    x-codeSamples:
+        - lang: javascript
+          source: |
+            <head>
+              <meta charset="UTF-8">
+              <meta name="viewport"
+                    content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+              <meta http-equiv="X-UA-Compatible" content="ie=edge">
+              <title>PayWithGoogle</title>
+              <script src="https://secure.przelewy24.pl/bundle/payWithGoogle/{{TOKEN}}"></script>
+            </head>
+            <body>
+            <script>
+              document.addEventListener("DOMContentLoaded", function () {
+                  Przelewy24PayWithGoogle.config({
+                      errorCallback: function () {
+                          alert("error");
+                      },
+                      exceptionCallback: function () {
+                          alert("exception");
+                      },
+                      requestFailedCallback: function () {
+                          alert('requestFailed');
+                      },
+                      completePaymentCallback: function () {
+                          alert("success");
+                      }
+                  });
+                  Przelewy24PayWithGoogle.charge();
+              });
+            </script>
+            </body>
+  - name: GPay API
+    x-displayName: Google Pay API
+####END GPAY####
+
+####APAY####
+  - name: APay Description
+    x-displayName: Apple Pay
+    description:  >
+
+      <img src="get.php?file=Apple_Pay.png" alt="ApplePay" class="center">
+
+      <h2>Wprowadzenie</h2>
+      Dzięki Apple Pay nie musisz zakładać żadnych kont ani wypełniać długich formularzy podczas zakupów na stronach internetowych otwartych w Safari na iPhonie, iPadzie lub Macu. A ponieważ czytnik Touch ID dostępny jest też w MacBooku Air i MacBooku Pro, finalizacja transakcji wymaga tylko przyłożenia palca i jest szybsza, łatwiejsza i bezpieczniejsza niż dotąd.<br><br>
+
+      <img src="get.php?file=white_label_MOBILE_6_a.png" alt="APay" class="center">
+
+
+      ## Opis
+
+      Podczas zakupów Apple Pay wykorzystuje numer przypisany konkretnemu urządzeniu i unikalny kod transakcji. Dzięki temu numer Twojej karty nigdy nie jest przechowywany ani na Twoim urządzeniu, ani na serwerach Apple. A w chwili dokonywania płatności Apple nigdy nie udostępnia numerów kart sprzedawcom
+
+      <div id="note">Usługa wymaga wcześniejszego podpisania umowy z operatorem kartowym (po szczegółowe informacje należy kierować pytania do Działu Handlowego Przelewy24).</div>
+
+
+      ## Tworzenie Merchant ID i certyfikacja domeny
+
+      Procesowanie transakcji poprzez ApplePay wymaga od Sprzedawcy utworzenia merchanta, oraz przejścia certyfikacji domeny. Proces opisany jest pod adresem <a href="https://developer.apple.com/documentation/apple_pay_on_the_web/configuring_your_environment">https://developer.apple.com/documentation/apple_pay_on_the_web/configuring_your_environment</a>.
+
+
+      ## Tworzenie Apple Pay Payment Processing Certificate
+
+      <div id="note">	Przed przystąpieniem do procesu tworzenia certyfikatu należy pozyskać plik CSR (po szczegółowe informacje należy kierować pytania do Działu Wdrożeń Przelewy24 integracja@przelewy24.pl).</div>
+      <br>
+      Po zalogowaniu się do swojego konta Apple Developer należy:
+
+      - wybrać opcję Certificates, IDs & Profiles,<br/>
+      - wybrać opcję Identifiers/Merchant IDs,<br/>
+      - wybrać utworzony w poprzednim kroku Merchant ID i przejść do opcji Edit,<br/>
+      - wybrać opcję Create Certificate w sekcji Apple Pay Payment Processing Certificate,<br/>
+      - wybrać opcję Continue,<br/>
+      - załadować plik CSR otrzymany od Działu Wdrożeń Przelewy24, korzystając z opcji Choose File,<br/>
+      - pobrać wygenerowany certyfikat i przekazać go do Działu Wdrożeń Przelewy24.<br/>
+
+
+      ## Schemat komunikacji Apple Pay
+
+      Po kliknięciu w przycisk "ApplePay" klientowi pojawia się na ekranie formatka Apple, na której może wybrać zapisaną na urządzeniu kartę. Skrypt w tle przekazuje zakodowane dane karty w obiekcie paymentData, którą sklep musi przejąć, a następnie zakodować przez funkcję base64 ponownie i przesłać w parametrze <b>methodRefId</b> wraz z danymi transakcji.
+
+      Sklep na swojej stronie musi wywołać skrypt udostępniony przez Apple (szczegóły dostępne pod adresem: <a href="https://developer.apple.com/documentation/apple_pay_on_the_web">https://developer.apple.com/documentation/apple_pay_on_the_web</a>).
+
+
+      Skrypt w tle przekazuje zakodowane dane karty, którą sklep musi przejąć, a następnie zakodować przez funkcję base64 ponownie i przesłać w parametrze <b>methodRefId</b> wraz z danymi transakcji.
+
+      ## Rejestracja transakcji
+
+        Rejestracja transakcji przez ApplePay polega na dodaniu dodatkowego parametru <a href="#tag/Transaction-service-API/paths/~1api~1v1~1transaction~1register/post"><b>"methodRefId"</b></a>. Parametr może zostać uzyskany z Apple poprzez **postMessage (paymentMethodToken.token)** i powinien być zakodowany funkcją base64.
+
+        <table border="0 px">
+          <tr>
+            <th bgcolor = "#9FFF9F"><font color = "black"><b>POST</b></font></th>
+            <th bgcolor = "#B8F0D0"><a href= 'https://secure.przelewy24.pl/api/v1/transaction/register'>https://secure.przelewy24.pl/api/v1/transaction/register</a></th>
+          </tr>
+        </table>
+
+        Additional **POST** call parameter
+
+        | Field name   |      Type      |  Required | Description |
+        |--------------|:--------------:|----------:|------------:|
+        | methodRefId  |     STRING     | Y     |Token otrzymany z ApplePay zakodowany funkcją base64 |
+
+        ##  Informacje dodatkowe
+
+        W celu uspójnienia stylistyki stosowanej na stronie www oraz w aplikacji mobilnej dostępne są wskazówki, których należy się trzymać przy wdrażaniu usługi ApplePay.
+        Opisy styli oraz oraz przycisków dla stron www dostepne są pod adresem <a href="https://developer.apple.com/apple-pay/acceptable-use-guidelines-for-websites/">https://developer.apple.com/apple-pay/acceptable-use-guidelines-for-websites/</a>.
+  - name: APay API
+    x-displayName: Apple Pay API
+####END APAY####
